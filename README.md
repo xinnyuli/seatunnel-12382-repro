@@ -13,7 +13,7 @@ separate pause experiment; the workflow never applies it.
 2. Actions -> `repro-12382` -> Run workflow. Start with `runs=1` as a smoke test (checks agent build,
    patch, Docker, classifier), then `runs=10` or more.
 3. Inputs: `runs` (per target and Java), `targets` (`baseline,dev`), `java` (`11` = the failing CI job;
-   `8,11` for both), `dev_sha` (pin dev), `trace` (`false` = uninstrumented control), `max_parallel`.
+   `8,11` for both), `dev_sha` (pin dev), `trace` (`false` = uninstrumented control), `stress` (`true` = stress-ng contention while the IT runs, reported as its own group), `max_parallel`.
 4. The run's Summary page shows the report; artifact `report` has `report.md/json`, each `run-*` artifact has
    `result.json`, `summary.txt`, `mvn.log.gz` and failsafe reports.
 

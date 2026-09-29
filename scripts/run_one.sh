@@ -6,6 +6,8 @@
 # Required env: TARGET  SHA  JAVA  IDX  SEATUNNEL_DIR
 # Optional env: OUT_DIR (default ./out)  TRACE (true|false, default true)  MAVEN_TIMEOUT_MIN (45)
 #               MVN_CMD (default ./mvnw; tests inject a stub)  PREBUILT_AGENT (skip build, tests only)
+#               STRESS (true|false, default false): stress-ng CPU/memory/IO contention, started only once the
+#               IT begins (not during the build); STRESS_CMD overrides the command (tests)
 #               GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT (used in the run id)
 set -uo pipefail
 
@@ -15,6 +17,8 @@ OUT_DIR="${OUT_DIR:-$PWD/out}"
 TRACE="${TRACE:-true}"
 MAVEN_TIMEOUT_MIN="${MAVEN_TIMEOUT_MIN:-45}"
 MVN_CMD="${MVN_CMD:-./mvnw}"
+STRESS="${STRESS:-false}"
+STRESS_CMD="${STRESS_CMD:-stress-ng --cpu $(nproc) --cpu-load 80 --vm 1 --vm-bytes 25% --hdd 1 --timeout 1800s}"
 # Never start with "gate-": that prefix would switch on the (experimental) flush-gate in the agent.
 RUN_ID="${TARGET}-j${JAVA}-n${IDX}-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 TEST_PATH='seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java'
@@ -27,7 +31,7 @@ mkdir -p "$OUT_DIR"
 LOG="$OUT_DIR/mvn.log"
 META=$(python3 - <<PY
 import json
-print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","trace_requested":"$TRACE"=="true"}))
+print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","trace_requested":"$TRACE"=="true","stress":"$STRESS"=="true"}))
 PY
 )
 
@@ -84,6 +88,14 @@ fi
 # like the failing scheduled run ("Test = zeta only").
 export RUN_ALL_CONTAINER=false RUN_ZETA_CONTAINER=true
 export MAVEN_OPTS="${MAVEN_OPTS:--Xmx4096m}"
+STRESS_PID=""
+if [ "$STRESS" = "true" ]; then
+  # Contention only while the IT runs, so the build is not slowed and the test sees the same load profile.
+  ( until grep -q 'Running org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT' "$LOG" 2>/dev/null; do sleep 2; done
+    echo "[harness] stress started: $STRESS_CMD" >>"$LOG"
+    exec $STRESS_CMD >>"$OUT_DIR/stress.log" 2>&1 ) &
+  STRESS_PID=$!
+fi
 START=$(date +%s)
 echo "[harness] run=$RUN_ID sha=$SHA java=$JAVA trace=$TRACE agentSha256=$AGENT_SHA" | tee "$LOG"
 # shellcheck disable=SC2086
@@ -94,6 +106,7 @@ timeout -k 60 "${MAVEN_TIMEOUT_MIN}m" $MVN_CMD -B -T 1 -Pci verify \
   -D"it.test"="$IT_METHOD" "${JVM_OPT[@]}" >>"$LOG" 2>&1
 MVN_EXIT=$?
 END=$(date +%s)
+if [ -n "$STRESS_PID" ]; then pkill -P "$STRESS_PID" 2>/dev/null; kill "$STRESS_PID" 2>/dev/null; wait "$STRESS_PID" 2>/dev/null; fi
 
 # ---- classify + package -------------------------------------------------------------------------
 META=$(python3 - <<PY

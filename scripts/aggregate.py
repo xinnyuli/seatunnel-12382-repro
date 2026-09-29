@@ -68,15 +68,15 @@ def load(root):
 def summarize(results):
     groups = OrderedDict()
     for r in sorted(results, key=lambda r: (r.get("target", ""), str(r.get("java", "")), r.get("idx", 0))):
-        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")))
+        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)))
         groups.setdefault(key, []).append(r)
     rows = []
-    for (target, sha, java), rs in groups.items():
+    for (target, sha, java, stress), rs in groups.items():
         c = Counter(r["category"] for r in rs)
         reached = c["PASS"] + c["ROW_MISSING"] + c["FAIL_AFTER_INSERT"]
         x = c["ROW_MISSING"]
         rows.append({
-            "target": target, "sha": sha, "java": java, "runs": len(rs),
+            "target": target, "sha": sha, "java": java, "stress": stress, "runs": len(rs),
             "counts": {k: c.get(k, 0) for k in CATS},
             "reached_check": reached,
             "row_missing": x,
@@ -110,12 +110,12 @@ def render(rows, expected, found, meta):
     L.append("- no production code modified; agent is test-only; resume experiment: **not applied**\n")
     if expected is not None and found < expected:
         L.append("> **WARNING:** %d of %d expected runs uploaded no result (job crashed or was cancelled). They are excluded below.\n" % (expected - found, expected))
-    L.append("| target | java | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | reproduction rate | 95% upper bound |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| target | java | stress | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | reproduction rate | 95% upper bound |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         c = r["counts"]
-        L.append("| %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
-            r["target"], r["java"], r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
+        L.append("| %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
+            r["target"], r["java"], "on" if r["stress"] else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
             c["SETUP_TIMEOUT"], c["SETUP_FAIL"], c["NO_TEST_RUN"], c["TIMEOUT"], pct(r["rate"]), pct(r["upper95_one_sided"])))
     L.append("\nRate = ROW_MISSING / runs that reached the id=15 check. Upper bound = exact (Clopper-Pearson) one-sided 95%. "
              "Runs that never reached the check (SETUP_*, NO_TEST_RUN, TIMEOUT) are not passes and are not in the denominator.\n")
@@ -123,7 +123,7 @@ def render(rows, expected, found, meta):
     L.append("## What to tell the maintainers\n")
     for r in rows:
         n, x = r["reached_check"], r["row_missing"]
-        who = "`%s` (%s, java %s)" % (r["target"], r["sha"][:12], r["java"])
+        who = "`%s` (%s, java %s%s)" % (r["target"], r["sha"][:12], r["java"], ", stress-ng on" if r["stress"] else "")
         if n == 0:
             L.append("- %s: no run reached the id=15 assertion (%d runs); no conclusion." % (who, r["runs"]))
         elif x == 0:

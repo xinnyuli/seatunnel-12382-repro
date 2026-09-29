@@ -25,6 +25,9 @@ on:
       trace:
         description: "Load the tracing agent (false = control run without instrumentation)"
         default: "true"
+      stress:
+        description: "Run stress-ng (CPU/memory/IO contention) while the IT executes, like Shaker; reported as a separate group"
+        default: "false"
       max_parallel:
         description: "Max concurrent jobs"
         default: "10"
@@ -138,8 +141,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" &
           wait
           df -h /
+      - name: Install stress-ng
+        if: ${{ inputs.stress == 'true' }}
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq stress-ng
       - name: Run the focused IT once and classify it
         env:
+          STRESS: ${{ inputs.stress }}
           TARGET: ${{ matrix.target }}
           SHA: ${{ matrix.sha }}
           JAVA: ${{ matrix.java }}

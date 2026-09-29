@@ -65,3 +65,14 @@ class Report(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StressGroups(unittest.TestCase):
+    def test_stress_is_a_separate_group(self):
+        root = tempfile.mkdtemp()
+        for i, s in enumerate([False, False, True, True]):
+            write(root, "r%d" % i, category="PASS" if i < 3 else "ROW_MISSING", target="baseline", sha="c7", java="11",
+                  idx=i, stress=s, trace_valid=True, boundary_verdict="v")
+        rows = G.summarize(G.load(root))
+        self.assertEqual({(r["stress"]): (r["runs"], r["row_missing"]) for r in rows}, {False: (2, 0), True: (2, 1)})
+        self.assertIn("stress-ng on", G.render(rows, 4, 4, {}))

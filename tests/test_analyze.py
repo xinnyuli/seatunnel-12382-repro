@@ -147,3 +147,38 @@ class Encoding(unittest.TestCase):
         with tempfile.NamedTemporaryFile("wb", suffix=".log", delete=False) as fh:
             fh.write(text.encode("utf-16"))
         self.assertEqual(A.analyze(A.read_lines(fh.name), 0)["category"], "PASS")
+
+
+class BareControl(unittest.TestCase):
+    """instrumentation=none: no [PG12382] markers exist; outcome comes from Maven + awaitility messages."""
+
+    def strip(self, lines):
+        return [l for l in lines if "[PG12382]" not in l]
+
+    def test_bare_pass(self):
+        r = A.analyze(self.strip(load("pass_real.txt")), 0, bare=True)
+        self.assertEqual(r["category"], "PASS")
+        self.assertFalse(r["trace_valid"])
+
+    def test_bare_row_missing_uses_original_failure_message(self):
+        lines = self.strip(load("pass_real.txt"))
+        lines = drop(lines, r"Tests run:|BUILD ") + [
+            "org.awaitility.core.ConditionTimeoutException: Assertion condition defined as a lambda expression in x.PostgresCDCIT expected: <1> but was: <0> within 3 minutes.\n"] + LOSS_TAIL
+        r = A.analyze(lines, 1, bare=True)
+        self.assertEqual(r["category"], "ROW_MISSING")
+        self.assertIn("uninstrumented", r["boundary_verdict"])
+
+    def test_bare_setup_timeout_is_not_row_missing(self):
+        lines = self.strip(load("setup_timeout_real.txt")) + [
+            "org.awaitility.core.ConditionTimeoutException: Assertion condition defined as a lambda expression in x.PostgresCDCIT expected: <true> but was: <false> within 30 seconds.\n"]
+        r = A.analyze(lines, 1, bare=True)
+        self.assertEqual(r["category"], "SETUP_TIMEOUT")
+
+    def test_bare_unknown_failure_not_counted_as_reaching_check(self):
+        lines = ["[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0\n", "[ERROR]   PostgresCDCIT.x:700 boom\n"]
+        r = A.analyze(lines, 1, bare=True)
+        self.assertEqual(r["category"], "FAIL_UNKNOWN")
+        self.assertFalse(r["reached_check"])
+
+    def test_bare_no_tests(self):
+        self.assertEqual(A.analyze(["[INFO] BUILD SUCCESS\n"], 0, bare=True)["category"], "NO_TEST_RUN")

@@ -22,9 +22,9 @@ on:
       dev_sha:
         description: "Pin dev to this commit instead of the tip of apache/seatunnel dev (optional)"
         default: ""
-      trace:
-        description: "Load the tracing agent (false = control run without instrumentation)"
-        default: "true"
+      instrumentation:
+        description: "full = IT log lines + agent | logs-only = IT log lines only | none = untouched upstream test, no agent (control: does observing change the outcome?)"
+        default: "full"
       stress:
         description: "Run stress-ng (CPU/memory/IO contention) while the IT executes, like Shaker; reported as a separate group"
         default: "false"
@@ -151,7 +151,7 @@ jobs:
           SHA: ${{ matrix.sha }}
           JAVA: ${{ matrix.java }}
           IDX: ${{ matrix.idx }}
-          TRACE: ${{ inputs.trace }}
+          INSTRUMENTATION: ${{ inputs.instrumentation }}
         run: |
           SEATUNNEL_DIR="$GITHUB_WORKSPACE/seatunnel" \
           OUT_DIR="$GITHUB_WORKSPACE/out" \

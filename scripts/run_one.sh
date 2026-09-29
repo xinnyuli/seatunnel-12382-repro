@@ -4,7 +4,10 @@
 # the IT file differs from the pinned revision.
 #
 # Required env: TARGET  SHA  JAVA  IDX  SEATUNNEL_DIR
-# Optional env: OUT_DIR (default ./out)  TRACE (true|false, default true)  MAVEN_TIMEOUT_MIN (45)
+# Optional env: OUT_DIR (default ./out)  MAVEN_TIMEOUT_MIN (45)
+#               INSTRUMENTATION: full (IT log lines + agent, default) | logs-only (IT log lines, no agent)
+#                                | none (untouched upstream test, no agent; the control for "does observing change it?")
+#               TRACE=false is the legacy spelling of logs-only
 #               MVN_CMD (default ./mvnw; tests inject a stub)  PREBUILT_AGENT (skip build, tests only)
 #               STRESS (true|false, default false): stress-ng CPU/memory/IO contention, started only once the
 #               IT begins (not during the build); STRESS_CMD overrides the command (tests)
@@ -15,6 +18,10 @@ HARNESS="$(cd "$(dirname "$0")/.." && pwd)"
 : "${TARGET:?}" "${SHA:?}" "${JAVA:?}" "${IDX:?}" "${SEATUNNEL_DIR:?}"
 OUT_DIR="${OUT_DIR:-$PWD/out}"
 TRACE="${TRACE:-true}"
+if [ -z "${INSTRUMENTATION:-}" ]; then
+  if [ "$TRACE" = "false" ]; then INSTRUMENTATION=logs-only; else INSTRUMENTATION=full; fi
+fi
+case "$INSTRUMENTATION" in full|logs-only|none) ;; *) echo "bad INSTRUMENTATION=$INSTRUMENTATION" >&2; exit 1;; esac
 MAVEN_TIMEOUT_MIN="${MAVEN_TIMEOUT_MIN:-45}"
 MVN_CMD="${MVN_CMD:-./mvnw}"
 STRESS="${STRESS:-false}"
@@ -31,7 +38,7 @@ mkdir -p "$OUT_DIR"
 LOG="$OUT_DIR/mvn.log"
 META=$(python3 - <<PY
 import json
-print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","trace_requested":"$TRACE"=="true","stress":"$STRESS"=="true"}))
+print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","instrumentation":"$INSTRUMENTATION","stress":"$STRESS"=="true"}))
 PY
 )
 
@@ -47,7 +54,9 @@ head_sha="$(git rev-parse HEAD)"
 [ -z "$(git status --porcelain)" ] || harness_error "working tree not clean before patching: $(git status --porcelain | head -3)"
 
 # ---- test-only observation patch ------------------------------------------------------------
-if ! git apply --check "$PATCH" 2>"$OUT_DIR/patch_error.txt"; then
+if [ "$INSTRUMENTATION" = "none" ]; then
+  : # untouched upstream test: nothing to apply
+elif ! git apply --check "$PATCH" 2>"$OUT_DIR/patch_error.txt"; then
   echo "observation patch does not apply at $SHA (the IT changed); needs review, not forced" >&2
   python3 - <<PY > "$OUT_DIR/result.json"
 import json
@@ -60,14 +69,19 @@ PY
 fi
 PATCHED=0
 trap 'rm -f "$SEATUNNEL_DIR/$RES_DIR/$AGENT_NAME"; [ "$PATCHED" = 1 ] && git -C "$SEATUNNEL_DIR" apply -R "$PATCH" 2>/dev/null; true' EXIT
-git apply "$PATCH" || harness_error "patch application failed after successful --check"
-PATCHED=1
+if [ "$INSTRUMENTATION" = "none" ]; then
+  EXPECT_CHANGED=""
+else
+  git apply "$PATCH" || harness_error "patch application failed after successful --check"
+  PATCHED=1
+  EXPECT_CHANGED="$TEST_PATH"
+fi
 changed="$(git diff HEAD --name-only)"
-[ "$changed" = "$TEST_PATH" ] || harness_error "changes outside the IT after patching: $changed"
+[ "$changed" = "$EXPECT_CHANGED" ] || harness_error "unexpected changes after patching: $changed"
 
 AGENT_SHA="not-loaded"
 JVM_OPT=()
-if [ "$TRACE" = "true" ]; then
+if [ "$INSTRUMENTATION" = "full" ]; then
   if [ -n "${PREBUILT_AGENT:-}" ]; then
     agent_jar="$PREBUILT_AGENT"
   else
@@ -81,7 +95,7 @@ if [ "$TRACE" = "true" ]; then
   JVM_OPT=("-Dseatunnel.e2e.seatunnel.server.jvm.option=-javaagent:/tmp/seatunnel/config/$AGENT_NAME=$RUN_ID")
 fi
 # only the IT file may differ from the pinned revision (the jar is untracked and removed on exit)
-[ "$(git diff HEAD --name-only)" = "$TEST_PATH" ] || harness_error "unexpected tracked change before run"
+[ "$(git diff HEAD --name-only)" = "$EXPECT_CHANGED" ] || harness_error "unexpected tracked change before run"
 
 # ---- run ----------------------------------------------------------------------------------------
 # Same flags as upstream's all-connectors-it-N job, narrowed to this one test; zeta container only,
@@ -97,7 +111,7 @@ if [ "$STRESS" = "true" ]; then
   STRESS_PID=$!
 fi
 START=$(date +%s)
-echo "[harness] run=$RUN_ID sha=$SHA java=$JAVA trace=$TRACE agentSha256=$AGENT_SHA" | tee "$LOG"
+echo "[harness] run=$RUN_ID sha=$SHA java=$JAVA instrumentation=$INSTRUMENTATION agentSha256=$AGENT_SHA" | tee "$LOG"
 # shellcheck disable=SC2086
 timeout -k 60 "${MAVEN_TIMEOUT_MIN}m" $MVN_CMD -B -T 1 -Pci verify \
   -pl seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e -am \
@@ -116,10 +130,11 @@ d.update(agent_sha256="$AGENT_SHA", duration_sec=$((END-START)))
 print(json.dumps(d))
 PY
 )
-python3 "$HARNESS/scripts/analyze_run.py" --log "$LOG" --maven-exit "$MVN_EXIT" --meta "$META" --out "$OUT_DIR/result.json" || harness_error "analyzer crashed"
+BARE=(); [ "$INSTRUMENTATION" = "none" ] && BARE=(--bare)
+python3 "$HARNESS/scripts/analyze_run.py" --log "$LOG" --maven-exit "$MVN_EXIT" --meta "$META" "${BARE[@]}" --out "$OUT_DIR/result.json" || harness_error "analyzer crashed"
 {
   echo "revision=$SHA"; echo "experimentalResume=false"; echo "run=$RUN_ID"; echo "agentSha256=$AGENT_SHA"
-  echo "observationPatchSha256=$(sha256sum "$PATCH" | cut -d' ' -f1)"; echo "javaMatrix=$JAVA"; echo "mavenExit=$MVN_EXIT"
+  echo "instrumentation=$INSTRUMENTATION"; echo "observationPatchSha256=$(sha256sum "$PATCH" | cut -d' ' -f1)"; echo "javaMatrix=$JAVA"; echo "mavenExit=$MVN_EXIT"
   echo "testDiff:"; git diff HEAD -- "$TEST_PATH"
   grep -E '\[PG12382\] |Tests run:|BUILD (SUCCESS|FAILURE)|^\[ERROR\]' "$LOG" | grep -v '^[+-]' 
 } >"$OUT_DIR/summary.txt" 2>/dev/null

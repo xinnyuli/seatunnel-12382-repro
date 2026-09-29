@@ -12,6 +12,7 @@ Categories (exactly one per run):
   SETUP_TIMEOUT      ConditionTimeout before the restored slot was active (e.g. the line-489
                      "committed LSN >= postSeedLsn" wait); the id=15 check was never reached
   SETUP_FAIL         failed before the restored slot was active, not a timeout
+  FAIL_UNKNOWN       (uninstrumented control only) failed, but without markers the phase cannot be told
   FAIL_AFTER_INSERT  INSERT happened, test failed for a reason other than a plain count=0 timeout
   NO_TEST_RUN        Maven finished but the test method did not run (0 tests / build failure /
                      container start failure)
@@ -64,7 +65,9 @@ TESTS_RUN_ANY = re.compile(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), S
 HOOK = re.compile(r"\[PG12382\] HOOK class=(\S+)")
 
 
-def analyze(lines, maven_exit):
+def analyze(lines, maven_exit, bare=False):
+    """bare=True: the run had neither the IT log lines nor the agent (instrumentation=none), so there are no
+    [PG12382] markers. Outcome is then read from Maven's result and the two awaitility messages only."""
     hooks = set()
     agent_ready = False
     trace_errors = []
@@ -79,6 +82,7 @@ def analyze(lines, maven_exit):
     final_tests = None
     error_lines = []
     fail_line_kinds = set()
+    setup_wait_msg = False
 
     for raw in lines:
         line = raw.rstrip("\n")
@@ -139,9 +143,11 @@ def analyze(lines, maven_exit):
                 fail_line_kinds.add("condition_timeout")
         if "expected: <1> but was: <0>" in line:
             fail_line_kinds.add("count0")
+        if "expected: <true> but was: <false> within 30 seconds" in line:
+            setup_wait_msg = True
 
     hook_missing = [h for h in REQUIRED_HOOKS if h not in hooks]
-    trace_valid = bool(agent_ready and not trace_errors and not hook_missing)
+    trace_valid = bool(agent_ready and not trace_errors and not hook_missing) and not bare
 
     count1 = any(c == 1 for c in sink_counts)
     last_count = sink_counts[-1] if sink_counts else None
@@ -151,6 +157,17 @@ def analyze(lines, maven_exit):
     # ---- category -------------------------------------------------------
     if maven_exit in (124, 137, 143):
         category = "TIMEOUT"
+    elif bare:
+        if not tests_ran:
+            category = "NO_TEST_RUN"
+        elif maven_exit == 0 and not tests_failed:
+            category = "PASS"
+        elif "count0" in fail_line_kinds:
+            category = "ROW_MISSING"           # same message the original failure had (":625 ... <1> but was: <0>")
+        elif setup_wait_msg:
+            category = "SETUP_TIMEOUT"
+        else:
+            category = "FAIL_UNKNOWN"           # failed, phase unknown without markers: not counted as reaching the check
     elif not tests_ran and not restored and not sink_counts:
         category = "NO_TEST_RUN"
     elif maven_exit == 0 and tests_ran and not tests_failed and count1:
@@ -177,7 +194,9 @@ def analyze(lines, maven_exit):
     last_seen = next((p for p in reversed(path) if p in have), None)
     boundary_of = dict(STAGES)
     boundary_of[SINK_STAGE] = "B3 sink receipt/commit"
-    if category == "ROW_MISSING":
+    if bare:
+        verdict = "uninstrumented control: no boundary evidence by design"
+    elif category == "ROW_MISSING":
         if not trace_valid:
             verdict = "trace incomplete: cannot attribute the loss to a boundary"
         elif last_seen is None:
@@ -246,9 +265,10 @@ def main(argv=None):
     ap.add_argument("--log", required=True)
     ap.add_argument("--maven-exit", type=int, required=True)
     ap.add_argument("--meta", default="{}", help="JSON object merged into the result")
+    ap.add_argument("--bare", action="store_true", help="instrumentation=none run (no markers exist)")
     ap.add_argument("--out", default="-")
     args = ap.parse_args(argv)
-    result = analyze(read_lines(args.log), args.maven_exit)
+    result = analyze(read_lines(args.log), args.maven_exit, bare=args.bare)
     result.update(json.loads(args.meta))
     text = json.dumps(result, indent=2, sort_keys=True)
     if args.out == "-":

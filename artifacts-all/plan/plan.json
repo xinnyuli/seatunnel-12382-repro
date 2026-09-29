@@ -1,0 +1,374 @@
+{
+  "matrix": {
+    "include": [
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 1
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 2
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 3
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 4
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 5
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 6
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 7
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 8
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 9
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 10
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 11
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 12
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 13
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 14
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 15
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 16
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 17
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 18
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 19
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 20
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 21
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 22
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 23
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 24
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 25
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 26
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 27
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 28
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 29
+      },
+      {
+        "target": "baseline",
+        "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+        "java": "11",
+        "idx": 30
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 1
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 2
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 3
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 4
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 5
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 6
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 7
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 8
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 9
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 10
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 11
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 12
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 13
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 14
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 15
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 16
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 17
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 18
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 19
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 20
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 21
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 22
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 23
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 24
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 25
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 26
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 27
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 28
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 29
+      },
+      {
+        "target": "dev",
+        "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+        "java": "11",
+        "idx": 30
+      }
+    ]
+  },
+  "expected": 60,
+  "revisions": {
+    "baseline": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+    "dev": "4c874e2a4061aea9d5db65e74edeb211b498fe27"
+  },
+  "dev_contains_11864": true,
+  "fix_11864": "5af8d789aa9ae3d94df4a9cc0f03cee3c0a6d0e6",
+  "observation_patch_sha256": "1d99d850e70c76d7b8e8326c229971fed858d52437e4ca3bb2e9aad89ddab9c5"
+}

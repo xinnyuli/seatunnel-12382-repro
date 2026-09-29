@@ -1,0 +1,49 @@
+{
+  "agent_ready": true,
+  "agent_sha256": "f04a992068e97c77f4bc518e8e5d5b145eba186fcedc061a1124a0575b62ff6d",
+  "boundary_verdict": "n/a (row delivered)",
+  "category": "PASS",
+  "committed_past_row": false,
+  "duration_sec": 510,
+  "event_lsn": 35815992,
+  "failure_lines": [],
+  "first_missing_stage": null,
+  "hooks_missing": [],
+  "idx": 9,
+  "insert_returned": true,
+  "invariant_violation": null,
+  "java": "11",
+  "maven_exit": 0,
+  "max_committed_lsn": 35815992,
+  "reached_check": true,
+  "restored_slot_active": true,
+  "run_id": "baseline-j11-n9-36576046533-1",
+  "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+  "sink_query_counts_seen": [
+    0,
+    1
+  ],
+  "sink_query_last": 1,
+  "stages_reached": [
+    "changeRecord_ENTER",
+    "enqueue_RETURN",
+    "shouldEmit_RETURN",
+    "processElement_RETURN",
+    "collect_RETURN",
+    "write_ENTER",
+    "addToBatch_RETURN",
+    "attemptFlush_RETURN",
+    "SINK_QUERY_count1"
+  ],
+  "stress": true,
+  "target": "baseline",
+  "tests_run": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "trace_errors": [],
+  "trace_requested": true,
+  "trace_valid": true
+}

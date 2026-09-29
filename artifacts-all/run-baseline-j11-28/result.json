@@ -1,0 +1,41 @@
+{
+  "agent_ready": true,
+  "agent_sha256": "f04a992068e97c77f4bc518e8e5d5b145eba186fcedc061a1124a0575b62ff6d",
+  "boundary_verdict": "no id=15 record observed at PostgresWalFetchTask/Debezium receiver (before B1)",
+  "category": "ROW_MISSING",
+  "committed_past_row": null,
+  "duration_sec": 606,
+  "event_lsn": null,
+  "failure_lines": [
+    "[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 436.309 s <<< FAILURE! - in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT",
+    "[ERROR]   PostgresCDCIT.testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes:633 \u00bb ConditionTimeout"
+  ],
+  "first_missing_stage": "changeRecord_ENTER",
+  "hooks_missing": [],
+  "idx": 28,
+  "insert_returned": true,
+  "invariant_violation": null,
+  "java": "11",
+  "maven_exit": 1,
+  "max_committed_lsn": 35821568,
+  "reached_check": true,
+  "restored_slot_active": true,
+  "run_id": "baseline-j11-n28-36576046533-1",
+  "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+  "sink_query_counts_seen": [
+    0
+  ],
+  "sink_query_last": 0,
+  "stages_reached": [],
+  "stress": true,
+  "target": "baseline",
+  "tests_run": [
+    1,
+    0,
+    1,
+    0
+  ],
+  "trace_errors": [],
+  "trace_requested": true,
+  "trace_valid": true
+}

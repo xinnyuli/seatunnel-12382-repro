@@ -1,0 +1,39 @@
+{
+  "agent_ready": true,
+  "agent_sha256": "f04a992068e97c77f4bc518e8e5d5b145eba186fcedc061a1124a0575b62ff6d",
+  "boundary_verdict": "n/a",
+  "category": "SETUP_TIMEOUT",
+  "committed_past_row": null,
+  "duration_sec": 580,
+  "event_lsn": null,
+  "failure_lines": [
+    "[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 416.222 s <<< FAILURE! - in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT",
+    "[ERROR]   PostgresCDCIT.testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes:489 \u00bb ConditionTimeout"
+  ],
+  "first_missing_stage": null,
+  "hooks_missing": [],
+  "idx": 17,
+  "insert_returned": false,
+  "invariant_violation": null,
+  "java": "11",
+  "maven_exit": 1,
+  "max_committed_lsn": 35796960,
+  "reached_check": false,
+  "restored_slot_active": false,
+  "run_id": "baseline-j11-n17-36576046533-1",
+  "sha": "c7304ace6e18d350314e92480df1fd3c0962f1f2",
+  "sink_query_counts_seen": [],
+  "sink_query_last": null,
+  "stages_reached": [],
+  "stress": true,
+  "target": "baseline",
+  "tests_run": [
+    1,
+    0,
+    1,
+    0
+  ],
+  "trace_errors": [],
+  "trace_requested": true,
+  "trace_valid": true
+}

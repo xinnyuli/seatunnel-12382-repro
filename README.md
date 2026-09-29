@@ -13,7 +13,7 @@ separate pause experiment; the workflow never applies it.
 2. Actions -> `repro-12382` -> Run workflow. Start with `runs=1` as a smoke test (checks agent build,
    patch, Docker, classifier), then `runs=10` or more.
 3. Inputs: `runs` (per target and Java), `targets` (`baseline,dev`), `java` (`11` = the failing CI job;
-   `8,11` for both), `dev_sha` (pin dev), `trace` (`false` = uninstrumented control), `stress` (`true` = stress-ng contention while the IT runs, reported as its own group), `max_parallel`.
+   `8,11` for both), `dev_sha` (pin dev), `instrumentation` (`full` = IT log lines + agent; `logs-only`; `none` = untouched upstream test, no agent = the control for "does observing change the outcome?"), `stress` (`true` = stress-ng contention while the IT runs, reported as its own group), `max_parallel`.
 4. The run's Summary page shows the report; artifact `report` has `report.md/json`, each `run-*` artifact has
    `result.json`, `summary.txt`, `mvn.log.gz` and failsafe reports.
 
@@ -21,7 +21,7 @@ Optional secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` avoid Docker Hub anony
 
 ## Categories (one per run)
 PASS / ROW_MISSING (the #12382 signature) / FAIL_AFTER_INSERT / SETUP_TIMEOUT (the ~line-489 wait, a different failure) /
-SETUP_FAIL / NO_TEST_RUN (incl. patch does not apply) / TIMEOUT. Reproduction rate = ROW_MISSING over runs that
+SETUP_FAIL / NO_TEST_RUN (incl. patch does not apply) / TIMEOUT / FAIL_UNKNOWN (only in `none` runs, where there are no markers to tell the phase). Reproduction rate = ROW_MISSING over runs that
 reached the id=15 check; setup failures are never counted as passes. Boundary verdicts (B1 fetcher handoff,
 B2 reader emission, B3 sink) are only attributed for a ROW_MISSING run with a valid trace.
 
@@ -32,3 +32,10 @@ from where this was written; the first `runs=1` dispatch is that test.
 
 ## Local tests
 `python3 -m unittest discover -s tests`
+
+## The uninstrumented control (`instrumentation=none`)
+Nothing is patched and no agent is loaded; the upstream test and its assertions run unchanged. Since no markers exist, the
+outcome is read from Maven and from the two awaitility messages: `expected: <1> but was: <0> within 3 minutes` (the #12382
+signature) vs `expected: <true> but was: <false> within 30 seconds` (the setup wait). Groups are reported side by side
+by `instrumentation` and `stress`. Different results between groups suggest observation changes the outcome; equal results
+only mean neither reproduced under these conditions.

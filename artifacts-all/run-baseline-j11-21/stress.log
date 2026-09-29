@@ -1,0 +1,11 @@
+stress-ng: info:  [2975] setting to a 30 mins, 0 secs run per stressor
+stress-ng: info:  [2975] dispatching hogs: 4 cpu, 1 vm, 1 hdd
+stress-ng: info:  [3540] cpu: for stable load results, select a specific cpu stress method with --cpu-method other than 'all'
+stress-ng: info:  [3541] cpu: for stable load results, select a specific cpu stress method with --cpu-method other than 'all'
+stress-ng: info:  [3542] cpu: for stable load results, select a specific cpu stress method with --cpu-method other than 'all'
+stress-ng: info:  [3543] cpu: for stable load results, select a specific cpu stress method with --cpu-method other than 'all'
+stress-ng: info:  [2975] skipped: 0
+stress-ng: info:  [2975] passed: 0
+stress-ng: info:  [2975] failed: 0
+stress-ng: info:  [2975] metrics untrustworthy: 0
+stress-ng: info:  [2975] successful run completed in 3 mins, 50.13 secs

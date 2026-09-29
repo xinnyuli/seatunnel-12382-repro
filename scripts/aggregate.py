@@ -13,7 +13,7 @@ import os
 import sys
 from collections import Counter, OrderedDict
 
-CATS = ["PASS", "ROW_MISSING", "FAIL_AFTER_INSERT", "SETUP_TIMEOUT", "SETUP_FAIL", "NO_TEST_RUN", "TIMEOUT"]
+CATS = ["PASS", "ROW_MISSING", "FAIL_AFTER_INSERT", "SETUP_TIMEOUT", "SETUP_FAIL", "NO_TEST_RUN", "TIMEOUT", "FAIL_UNKNOWN"]
 
 
 def _binom_cdf(k, n, p):
@@ -68,15 +68,15 @@ def load(root):
 def summarize(results):
     groups = OrderedDict()
     for r in sorted(results, key=lambda r: (r.get("target", ""), str(r.get("java", "")), r.get("idx", 0))):
-        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)))
+        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)), r.get("instrumentation", "full"))
         groups.setdefault(key, []).append(r)
     rows = []
-    for (target, sha, java, stress), rs in groups.items():
+    for (target, sha, java, stress, instr), rs in groups.items():
         c = Counter(r["category"] for r in rs)
         reached = c["PASS"] + c["ROW_MISSING"] + c["FAIL_AFTER_INSERT"]
         x = c["ROW_MISSING"]
         rows.append({
-            "target": target, "sha": sha, "java": java, "stress": stress, "runs": len(rs),
+            "target": target, "sha": sha, "java": java, "stress": stress, "instrumentation": instr, "runs": len(rs),
             "counts": {k: c.get(k, 0) for k in CATS},
             "reached_check": reached,
             "row_missing": x,
@@ -110,20 +110,20 @@ def render(rows, expected, found, meta):
     L.append("- no production code modified; agent is test-only; resume experiment: **not applied**\n")
     if expected is not None and found < expected:
         L.append("> **WARNING:** %d of %d expected runs uploaded no result (job crashed or was cancelled). They are excluded below.\n" % (expected - found, expected))
-    L.append("| target | java | stress | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | reproduction rate | 95% upper bound |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| target | java | instrumentation | stress | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | FAIL_UNKNOWN | reproduction rate | 95% upper bound |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         c = r["counts"]
-        L.append("| %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
-            r["target"], r["java"], "on" if r["stress"] else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
-            c["SETUP_TIMEOUT"], c["SETUP_FAIL"], c["NO_TEST_RUN"], c["TIMEOUT"], pct(r["rate"]), pct(r["upper95_one_sided"])))
+        L.append("| %s | %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
+            r["target"], r["java"], r["instrumentation"], "on" if r["stress"] else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
+            c["SETUP_TIMEOUT"], c["SETUP_FAIL"], c["NO_TEST_RUN"], c["TIMEOUT"], c["FAIL_UNKNOWN"], pct(r["rate"]), pct(r["upper95_one_sided"])))
     L.append("\nRate = ROW_MISSING / runs that reached the id=15 check. Upper bound = exact (Clopper-Pearson) one-sided 95%. "
              "Runs that never reached the check (SETUP_*, NO_TEST_RUN, TIMEOUT) are not passes and are not in the denominator.\n")
 
     L.append("## What to tell the maintainers\n")
     for r in rows:
         n, x = r["reached_check"], r["row_missing"]
-        who = "`%s` (%s, java %s%s)" % (r["target"], r["sha"][:12], r["java"], ", stress-ng on" if r["stress"] else "")
+        who = "`%s` (%s, java %s%s)" % (r["target"], r["sha"][:12], r["java"], (", stress-ng on" if r["stress"] else "") + (", instrumentation=" + r["instrumentation"] if r["instrumentation"] != "full" else ""))
         if n == 0:
             L.append("- %s: no run reached the id=15 assertion (%d runs); no conclusion." % (who, r["runs"]))
         elif x == 0:
@@ -150,7 +150,8 @@ def render(rows, expected, found, meta):
         L.append("> Some counted runs have `trace_valid=false` (agent not loaded / hook missing / TRACE_ERROR). Their outcome is valid; their boundary evidence is not.\n")
     L.append("## Caveats\n")
     L.append("- The tracing agent adds timing overhead; passing with it does not rule out an uninstrumented race. "
-             "If nothing reproduces, run the same matrix once with `trace=false` to compare (workflow input).")
+             "Compare against the `instrumentation=none` group (no IT log lines, no agent) when it exists; a difference between groups "
+             "suggests observation changes the outcome, equal results only mean neither reproduced under these conditions.")
     L.append("- Hosted runners differ from the original job's runner; a low rate here bounds *this* setup only.")
     L.append("- SETUP_TIMEOUT (the `committed LSN >= postSeedLsn` wait, ~line 489) is a different failure from #12382 and is reported on its own.")
     return "\n".join(L) + "\n"

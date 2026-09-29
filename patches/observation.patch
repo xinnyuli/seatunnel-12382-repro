@@ -1,0 +1,42 @@
+diff --git a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+index bd889c00e..3d02e0987 100644
+--- a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
++++ b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+@@ -620,20 +620,34 @@ public class PostgresCDCIT extends TestSuiteBase implements TestResource {
+             waitForReplicationSlotActive(committedSlotName);
+             // Insert only after the restored replication connection is active so this CDC record
+             // is not written before the restored slot can consume it.
++            log.info(
++                    "[PG12382] RESTORED_SLOT_ACTIVE job={} slot={} target=inventory.postgres_cdc_table_1 id=15",
++                    committedOffsetJobId,
++                    committedSlotName);
+             insertSourceTableRow(POSTGRESQL_SCHEMA, SOURCE_TABLE_1, 15);
++            log.info(
++                    "[PG12382] SOURCE_INSERT_RETURN job={} slot={} id=15",
++                    committedOffsetJobId,
++                    committedSlotName);
+             await().atMost(RESTORE_ASSERT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                     .untilAsserted(
+                             () -> {
+                                 assertJobHasNoAsyncFailure(restoredCommittedOffsetJob);
+-                                Assertions.assertEquals(
+-                                        1,
++                                int targetCount =
+                                         query(
+                                                         "select * from "
+                                                                 + POSTGRESQL_SCHEMA
+                                                                 + "."
+                                                                 + SINK_TABLE_1
+                                                                 + " where id = 15")
+-                                                .size());
++                                                .size();
++                                log.info(
++                                        "[PG12382] SINK_QUERY job={} table={}.{} id=15 count={}",
++                                        committedOffsetJobId,
++                                        POSTGRESQL_SCHEMA,
++                                        SINK_TABLE_1,
++                                        targetCount);
++                                Assertions.assertEquals(1, targetCount);
+                             });
+         } finally {
+             try {

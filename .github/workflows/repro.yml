@@ -1,0 +1,190 @@
+name: repro-12382
+
+# Repeats apache/seatunnel PostgresCDCIT#testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes
+# (the id=15 restore assertion of issue #12382) on hosted runners, one run per parallel job, at
+#   * the failing revision c7304ace6e18d350314e92480df1fd3c0962f1f2, and
+#   * current dev (resolved at dispatch time, verified to contain merged #11864 = 5af8d789...).
+# Test-only: a patch that only adds log lines to the IT + a javaagent loaded into the test's
+# SeaTunnel server JVM. No production code is modified. The exact revisions are written to the report.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Runs per target and Java version (each is its own parallel job)"
+        default: "10"
+      targets:
+        description: "baseline (c7304ace...), dev, or both"
+        default: "baseline,dev"
+      java:
+        description: "Host JDK(s): the failing CI job was Java 11; upstream also runs 8"
+        default: "11"
+      dev_sha:
+        description: "Pin dev to this commit instead of the tip of apache/seatunnel dev (optional)"
+        default: ""
+      trace:
+        description: "Load the tracing agent (false = control run without instrumentation)"
+        default: "true"
+      max_parallel:
+        description: "Max concurrent jobs"
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected: ${{ steps.plan.outputs.expected }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve and verify revisions
+        id: resolve
+        env:
+          DEV_SHA_INPUT: ${{ inputs.dev_sha }}
+        run: |
+          set -euo pipefail
+          BASELINE=c7304ace6e18d350314e92480df1fd3c0962f1f2
+          FIX=5af8d789aa9ae3d94df4a9cc0f03cee3c0a6d0e6
+          git init -q /tmp/upstream && cd /tmp/upstream
+          git remote add origin https://github.com/apache/seatunnel.git
+          git fetch -q --filter=blob:none --no-tags origin dev "$FIX" "$BASELINE"
+          DEV_SHA="${DEV_SHA_INPUT:-$(git ls-remote origin refs/heads/dev | cut -f1)}"
+          [ -n "$DEV_SHA_INPUT" ] && git fetch -q --filter=blob:none --no-tags origin "$DEV_SHA_INPUT"
+          git cat-file -e "$DEV_SHA^{commit}"
+          if git merge-base --is-ancestor "$FIX" "$DEV_SHA"; then CONTAINS=true; else CONTAINS=false; fi
+          git merge-base --is-ancestor "$BASELINE" "$DEV_SHA" || { echo "baseline is not an ancestor of dev"; exit 1; }
+          echo "dev=$DEV_SHA contains_11864=$CONTAINS"
+          echo "dev_sha=$DEV_SHA" >> "$GITHUB_OUTPUT"
+          echo "contains=$CONTAINS" >> "$GITHUB_OUTPUT"
+      - name: Build matrix
+        id: plan
+        run: |
+          set -euo pipefail
+          python3 scripts/plan_matrix.py \
+            --targets "${{ inputs.targets }}" --runs "${{ inputs.runs }}" --java "${{ inputs.java }}" \
+            --dev-sha "${{ steps.resolve.outputs.dev_sha }}" \
+            --dev-contains-11864 "${{ steps.resolve.outputs.contains }}" \
+            --patch-sha256 "$(sha256sum patches/observation.patch | cut -d' ' -f1)" \
+            --out plan.json
+          echo "matrix=$(python3 -c 'import json;print(json.dumps(json.load(open("plan.json"))["matrix"]))')" >> "$GITHUB_OUTPUT"
+          echo "expected=$(python3 -c 'import json;print(json.load(open("plan.json"))["expected"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: plan.json
+
+  agent:
+    # Build the test-only agent once and run its executable self-check (real Kafka SourceRecord/Struct,
+    # id 15 vs 150, unchanged return values/exceptions). Every run uses this exact jar.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+      - run: bash scripts/build_agent.sh "$PWD/out/pg12382-test-agent.jar"
+      - name: Unit tests of the harness
+        run: python3 -m unittest discover -s tests -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-jar
+          path: out/pg12382-test-agent.jar
+
+  run:
+    needs: [plan, agent]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    name: run ${{ matrix.target }} j${{ matrix.java }} #${{ matrix.idx }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: apache/seatunnel
+          ref: ${{ matrix.sha }}
+          path: seatunnel
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-jar
+          path: agent-jar
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+          cache-dependency-path: seatunnel/**/pom.xml
+      - name: Docker Hub login (optional; avoids anonymous pull limits when many jobs start together)
+        if: ${{ env.DH_USER != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" &
+          wait
+          df -h /
+      - name: Run the focused IT once and classify it
+        env:
+          TARGET: ${{ matrix.target }}
+          SHA: ${{ matrix.sha }}
+          JAVA: ${{ matrix.java }}
+          IDX: ${{ matrix.idx }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          SEATUNNEL_DIR="$GITHUB_WORKSPACE/seatunnel" \
+          OUT_DIR="$GITHUB_WORKSPACE/out" \
+          PREBUILT_AGENT="$GITHUB_WORKSPACE/agent-jar/pg12382-test-agent.jar" \
+          bash harness/scripts/run_one.sh
+      - name: Result
+        if: always()
+        run: |
+          if [ -f out/result.json ]; then
+            python3 -c "import json;d=json.load(open('out/result.json'));print('### ', d['target'], 'java', d['java'], '#', d['idx'], '->', d['category'], '\n', d.get('boundary_verdict',''))" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ matrix.target }}-j${{ matrix.java }}-${{ matrix.idx }}
+          path: out
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    needs: [plan, run]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: run-*
+          path: results
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: planned
+      - name: Aggregate
+        run: |
+          python3 scripts/aggregate.py --results results --meta planned/plan.json \
+            --expected "${{ needs.plan.outputs.expected }}" --out-dir report > /dev/null
+          cat report/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report

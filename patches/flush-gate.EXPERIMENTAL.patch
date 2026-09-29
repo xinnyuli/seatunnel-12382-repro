@@ -1,0 +1,158 @@
+diff --git a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+index bd889c00e..372b69949 100644
+--- a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
++++ b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+@@ -620,20 +620,35 @@ public class PostgresCDCIT extends TestSuiteBase implements TestResource {
+             waitForReplicationSlotActive(committedSlotName);
+             // Insert only after the restored replication connection is active so this CDC record
+             // is not written before the restored slot can consume it.
++            log.info(
++                    "[PG12382] RESTORED_SLOT_ACTIVE job={} slot={} target=inventory.postgres_cdc_table_1 id=15",
++                    committedOffsetJobId,
++                    committedSlotName);
+             insertSourceTableRow(POSTGRESQL_SCHEMA, SOURCE_TABLE_1, 15);
++            log.info(
++                    "[PG12382] SOURCE_INSERT_RETURN job={} slot={} id=15",
++                    committedOffsetJobId,
++                    committedSlotName);
++            verifyTargetFlushGate(container, committedOffsetJobId, restoredCommittedOffsetJob);
+             await().atMost(RESTORE_ASSERT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                     .untilAsserted(
+                             () -> {
+                                 assertJobHasNoAsyncFailure(restoredCommittedOffsetJob);
+-                                Assertions.assertEquals(
+-                                        1,
++                                int targetCount =
+                                         query(
+                                                         "select * from "
+                                                                 + POSTGRESQL_SCHEMA
+                                                                 + "."
+                                                                 + SINK_TABLE_1
+                                                                 + " where id = 15")
+-                                                .size());
++                                                .size();
++                                log.info(
++                                        "[PG12382] SINK_QUERY job={} table={}.{} id=15 count={}",
++                                        committedOffsetJobId,
++                                        POSTGRESQL_SCHEMA,
++                                        SINK_TABLE_1,
++                                        targetCount);
++                                Assertions.assertEquals(1, targetCount);
+                             });
+         } finally {
+             try {
+@@ -660,6 +675,114 @@ public class PostgresCDCIT extends TestSuiteBase implements TestResource {
+         }
+     }
+ 
++    private void verifyTargetFlushGate(
++            TestContainer container, long jobId, CompletableFuture<Void> runningJob)
++            throws IOException, InterruptedException {
++        String run = System.getProperty("pg12382.gateRun", "");
++        if (run.isEmpty()) {
++            return;
++        }
++        Assertions.assertTrue(run.matches("gate-[a-zA-Z0-9-]+"));
++        java.nio.file.Path release = java.nio.file.Files.createTempFile("pg12382-release-", ".txt");
++        java.util.concurrent.atomic.AtomicLong checkpoint =
++                new java.util.concurrent.atomic.AtomicLong(-1);
++        java.util.regex.Pattern reached =
++                java.util.regex.Pattern.compile(
++                        "run="
++                                + run
++                                + " job="
++                                + jobId
++                                + " .*stage=GATE_REACHED id=15 checkpoint=([0-9]+)");
++        try {
++            await().atMost(20, TimeUnit.SECONDS)
++                    .untilAsserted(
++                            () -> {
++                                assertJobHasNoAsyncFailure(runningJob);
++                                String logs = container.getServerLogs();
++                                Assertions.assertFalse(
++                                        logs.contains("TRACE_ERROR"),
++                                        "Probe failure, not data loss");
++                                java.util.regex.Matcher match = reached.matcher(logs);
++                                Assertions.assertTrue(
++                                        match.find(),
++                                        "Target batch has not reached the checkpoint gate");
++                                checkpoint.set(Long.parseLong(match.group(1)));
++                            });
++            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
++            do {
++                assertJobHasNoAsyncFailure(runningJob);
++                Assertions.assertEquals(
++                        0,
++                        query(
++                                        "select * from "
++                                                + POSTGRESQL_SCHEMA
++                                                + "."
++                                                + SINK_TABLE_1
++                                                + " where id = 15")
++                                .size(),
++                        "Target must remain absent while its batch is held");
++                String logs = container.getServerLogs();
++                Assertions.assertFalse(
++                        logs.contains("TRACE_ERROR"), "Probe failure, not data loss");
++                Assertions.assertFalse(
++                        logs.contains("GATE_COMPLETED_WHILE_HELD"),
++                        "Checkpoint completed while the target batch was held");
++                Assertions.assertFalse(
++                        gateCheckpointCompleted(logs, run, jobId, checkpoint.get()),
++                        "Target checkpoint already completed");
++                Thread.sleep(250);
++            } while (System.nanoTime() < end);
++            log.info(
++                    "[PG12382] GATE_OBSERVATION_PASS job={} checkpoint={} id=15 holdSeconds=3 sinkCount=0",
++                    jobId,
++                    checkpoint.get());
++        } finally {
++            try {
++                container.copyAbsolutePathToContainer(
++                        release.toString(), "/tmp/" + run + ".release");
++            } finally {
++                java.nio.file.Files.deleteIfExists(release);
++            }
++        }
++        await().atMost(30, TimeUnit.SECONDS)
++                .untilAsserted(
++                        () -> {
++                            assertJobHasNoAsyncFailure(runningJob);
++                            String logs = container.getServerLogs();
++                            Assertions.assertFalse(
++                                    logs.contains("TRACE_ERROR"), "Probe failure, not data loss");
++                            Assertions.assertTrue(
++                                    gateCheckpointCompleted(logs, run, jobId, checkpoint.get()),
++                                    "Same checkpoint must complete after release");
++                            Assertions.assertEquals(
++                                    1,
++                                    query(
++                                                    "select * from "
++                                                            + POSTGRESQL_SCHEMA
++                                                            + "."
++                                                            + SINK_TABLE_1
++                                                            + " where id = 15")
++                                            .size());
++                        });
++        log.info(
++                "[PG12382] GATE_EXPERIMENT_PASS job={} checkpoint={} id=15 sinkCount=1",
++                jobId,
++                checkpoint.get());
++    }
++
++    private boolean gateCheckpointCompleted(String logs, String run, long jobId, long checkpoint) {
++        return java.util.regex.Pattern.compile(
++                        "run="
++                                + run
++                                + " job="
++                                + jobId
++                                + " .*stage=notifyCheckpointComplete_RETURN checkpoint="
++                                + checkpoint
++                                + "\\b")
++                .matcher(logs)
++                .find();
++    }
++
+     @TestTemplate
+     @DisabledOnContainer(
+             value = {},

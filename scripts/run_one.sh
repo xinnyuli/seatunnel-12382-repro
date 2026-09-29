@@ -11,6 +11,9 @@
 #               MVN_CMD (default ./mvnw; tests inject a stub)  PREBUILT_AGENT (skip build, tests only)
 #               STRESS (true|false, default false): stress-ng CPU/memory/IO contention, started only once the
 #               IT begins (not during the build); STRESS_CMD overrides the command (tests)
+#               DBZ_LOGS (true|false, default false): raise three Debezium classes that log the WAL resume
+#               search (WalPositionLocator, AbstractMessageDecoder, PostgresStreamingChangeEventSource) from
+#               WARN to INFO in the test container's log4j2.properties (a test resource). Config only.
 #               GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT (used in the run id)
 set -uo pipefail
 
@@ -25,12 +28,15 @@ case "$INSTRUMENTATION" in full|logs-only|none) ;; *) echo "bad INSTRUMENTATION=
 MAVEN_TIMEOUT_MIN="${MAVEN_TIMEOUT_MIN:-45}"
 MVN_CMD="${MVN_CMD:-./mvnw}"
 STRESS="${STRESS:-false}"
+DBZ_LOGS="${DBZ_LOGS:-false}"
+case "$DBZ_LOGS" in true|false) ;; *) echo "bad DBZ_LOGS=$DBZ_LOGS" >&2; exit 1;; esac
 STRESS_CMD="${STRESS_CMD:-stress-ng --cpu $(nproc) --cpu-load 80 --vm 1 --vm-bytes 25% --hdd 1 --timeout 1800s}"
 # Never start with "gate-": that prefix would switch on the (experimental) flush-gate in the agent.
 RUN_ID="${TARGET}-j${JAVA}-n${IDX}-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
 TEST_PATH='seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java'
 RES_DIR='seatunnel-e2e/seatunnel-engine-e2e/connector-seatunnel-e2e-base/src/test/resources'
 AGENT_NAME='pg12382-test-agent.jar'
+LOG4J="$RES_DIR/log4j2.properties"
 PATCH="$HARNESS/patches/observation.patch"
 IT_METHOD='PostgresCDCIT#testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes'
 
@@ -38,7 +44,7 @@ mkdir -p "$OUT_DIR"
 LOG="$OUT_DIR/mvn.log"
 META=$(python3 - <<PY
 import json
-print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","instrumentation":"$INSTRUMENTATION","stress":"$STRESS"=="true"}))
+print(json.dumps({"target":"$TARGET","sha":"$SHA","java":"$JAVA","idx":int("$IDX"),"run_id":"$RUN_ID","instrumentation":"$INSTRUMENTATION","stress":"$STRESS"=="true","dbz_logs":"$DBZ_LOGS"=="true"}))
 PY
 )
 
@@ -68,7 +74,7 @@ PY
   exit 0
 fi
 PATCHED=0
-trap 'rm -f "$SEATUNNEL_DIR/$RES_DIR/$AGENT_NAME"; [ "$PATCHED" = 1 ] && git -C "$SEATUNNEL_DIR" apply -R "$PATCH" 2>/dev/null; true' EXIT
+trap 'rm -f "$SEATUNNEL_DIR/$RES_DIR/$AGENT_NAME"; [ "$PATCHED" = 1 ] && git -C "$SEATUNNEL_DIR" apply -R "$PATCH" 2>/dev/null; [ "$DBZ_LOGS" = true ] && git -C "$SEATUNNEL_DIR" checkout -- "$LOG4J" 2>/dev/null; true' EXIT
 if [ "$INSTRUMENTATION" = "none" ]; then
   EXPECT_CHANGED=""
 else
@@ -76,7 +82,23 @@ else
   PATCHED=1
   EXPECT_CHANGED="$TEST_PATH"
 fi
-changed="$(git diff HEAD --name-only)"
+# ---- optional: surface Debezium's WAL resume decisions (test resource config only) ------------
+if [ "$DBZ_LOGS" = "true" ]; then
+  # Upstream sets io.debezium.connector to WARN here; more specific loggers override it for three classes.
+  grep -q '^logger.debezium.name=io.debezium.connector$' "$LOG4J" || harness_error "unexpected $LOG4J layout; not editing it"
+  cat >>"$LOG4J" <<'L4J'
+
+# [PG12382] test-only (issue #12382): log Debezium's WAL resume search and replay filtering
+logger.pg12382loc.name=io.debezium.connector.postgresql.connection.WalPositionLocator
+logger.pg12382loc.level=INFO
+logger.pg12382dec.name=io.debezium.connector.postgresql.connection.AbstractMessageDecoder
+logger.pg12382dec.level=INFO
+logger.pg12382src.name=io.debezium.connector.postgresql.PostgresStreamingChangeEventSource
+logger.pg12382src.level=INFO
+L4J
+  EXPECT_CHANGED="$(printf '%s\n%s\n' "$EXPECT_CHANGED" "$LOG4J" | sed '/^$/d' | LC_ALL=C sort)"
+fi
+changed="$(git diff HEAD --name-only | LC_ALL=C sort)"
 [ "$changed" = "$EXPECT_CHANGED" ] || harness_error "unexpected changes after patching: $changed"
 
 AGENT_SHA="not-loaded"
@@ -94,8 +116,9 @@ if [ "$INSTRUMENTATION" = "full" ]; then
   AGENT_SHA="$(sha256sum "$RES_DIR/$AGENT_NAME" | cut -d' ' -f1)"
   JVM_OPT=("-Dseatunnel.e2e.seatunnel.server.jvm.option=-javaagent:/tmp/seatunnel/config/$AGENT_NAME=$RUN_ID")
 fi
-# only the IT file may differ from the pinned revision (the jar is untracked and removed on exit)
-[ "$(git diff HEAD --name-only)" = "$EXPECT_CHANGED" ] || harness_error "unexpected tracked change before run"
+# only the IT file (and, with DBZ_LOGS, the test log4j2.properties) may differ from the pinned revision
+# (the jar is untracked and removed on exit)
+[ "$(git diff HEAD --name-only | LC_ALL=C sort)" = "$EXPECT_CHANGED" ] || harness_error "unexpected tracked change before run"
 
 # ---- run ----------------------------------------------------------------------------------------
 # Same flags as upstream's all-connectors-it-N job, narrowed to this one test; zeta container only,
@@ -111,7 +134,7 @@ if [ "$STRESS" = "true" ]; then
   STRESS_PID=$!
 fi
 START=$(date +%s)
-echo "[harness] run=$RUN_ID sha=$SHA java=$JAVA instrumentation=$INSTRUMENTATION agentSha256=$AGENT_SHA" | tee "$LOG"
+echo "[harness] run=$RUN_ID sha=$SHA java=$JAVA instrumentation=$INSTRUMENTATION dbzLogs=$DBZ_LOGS agentSha256=$AGENT_SHA" | tee "$LOG"
 # shellcheck disable=SC2086
 timeout -k 60 "${MAVEN_TIMEOUT_MIN}m" $MVN_CMD -B -T 1 -Pci verify \
   -pl seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e -am \
@@ -134,12 +157,13 @@ BARE=(); [ "$INSTRUMENTATION" = "none" ] && BARE=(--bare)
 python3 "$HARNESS/scripts/analyze_run.py" --log "$LOG" --maven-exit "$MVN_EXIT" --meta "$META" "${BARE[@]}" --out "$OUT_DIR/result.json" || harness_error "analyzer crashed"
 {
   echo "revision=$SHA"; echo "experimentalResume=false"; echo "run=$RUN_ID"; echo "agentSha256=$AGENT_SHA"
-  echo "instrumentation=$INSTRUMENTATION"; echo "observationPatchSha256=$(sha256sum "$PATCH" | cut -d' ' -f1)"; echo "javaMatrix=$JAVA"; echo "mavenExit=$MVN_EXIT"
+  echo "instrumentation=$INSTRUMENTATION"; echo "dbzLogs=$DBZ_LOGS"; echo "observationPatchSha256=$(sha256sum "$PATCH" | cut -d' ' -f1)"; echo "javaMatrix=$JAVA"; echo "mavenExit=$MVN_EXIT"
   echo "testDiff:"; git diff HEAD -- "$TEST_PATH"
-  grep -E '\[PG12382\] |Tests run:|BUILD (SUCCESS|FAILURE)|^\[ERROR\]' "$LOG" | grep -v '^[+-]' 
+  echo "log4jDiff:"; git diff HEAD -- "$LOG4J"
+  grep -E '\[PG12382\] |WalPositionLocator - |AbstractMessageDecoder - |PostgresStreamingChangeEventSource - |Tests run:|BUILD (SUCCESS|FAILURE)|^\[ERROR\]' "$LOG" | grep -v '^[+-]' 
 } >"$OUT_DIR/summary.txt" 2>/dev/null
 FS="seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/target/failsafe-reports"
 [ -d "$FS" ] && mkdir -p "$OUT_DIR/failsafe-reports" && cp -r "$FS"/. "$OUT_DIR/failsafe-reports/" 2>/dev/null
 gzip -f "$LOG"
-python3 -c "import json;d=json.load(open('$OUT_DIR/result.json'));print('[harness] category=%s trace_valid=%s verdict=%s'%(d['category'],d['trace_valid'],d['boundary_verdict']))"
+python3 -c "import json;d=json.load(open('$OUT_DIR/result.json'));print('[harness] category=%s trace_valid=%s verdict=%s dbz_false_match=%s'%(d['category'],d['trace_valid'],d['boundary_verdict'],d.get('dbz_false_match')))"
 exit 0

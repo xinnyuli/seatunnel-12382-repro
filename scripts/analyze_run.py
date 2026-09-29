@@ -64,6 +64,79 @@ EVENT_LSN = re.compile(r"eventLsn=(\d+)")
 TESTS_RUN_ANY = re.compile(r"Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)")
 HOOK = re.compile(r"\[PG12382\] HOOK class=(\S+)")
 
+# ---- Debezium 1.9 WAL resume decisions (only present when the run enabled DBZ_LOGS) ----------
+# Emitted by io.debezium.connector.postgresql.connection.WalPositionLocator / AbstractMessageDecoder and
+# PostgresStreamingChangeEventSource. Lsn.toString() is "LSN{<hi>/<lo>}".
+_LSN = r"LSN\{([0-9A-Fa-f]+)/([0-9A-Fa-f]+)\}"
+DBZ_LOOKING = re.compile(r"WalPositionLocator - Looking for WAL restart position for last commit LSN '(?:%s|null)' and last change LSN '(?:%s|null)'" % (_LSN, _LSN))
+DBZ_AFTER_STORED = re.compile(r"WalPositionLocator - LSN after last stored change LSN '%s' received" % _LSN)
+DBZ_WILL_RESTART = re.compile(r"WalPositionLocator - Will restart from LSN '%s' that (?P<why>.*)$" % _LSN)
+DBZ_RESUME = re.compile(r"PostgresStreamingChangeEventSource - WAL resume position '%s' discovered" % _LSN)
+DBZ_SKIPPED = re.compile(r"AbstractMessageDecoder - Streaming requested from LSN %s, received LSN %s identified as already processed" % (_LSN, _LSN))
+DBZ_FILTER_OFF = re.compile(r"WalPositionLocator - Message with LSN '%s' arrived, switching off the filtering" % _LSN)
+
+
+def _lsn(hi, lo):
+    return (int(hi, 16) << 32) + int(lo, 16) if hi is not None else None
+
+
+def analyze_dbz_resume(lines):
+    """Reconstruct Debezium's WAL resume search for the LAST streaming start in the log (the restore).
+
+    Hypothesis under test (#12382): the stored offset's lsn_proc is a COMMIT end LSN (lsn_proc == lsn_commit).
+    In Postgres the end of a commit record is the start of the next record, so if the next transaction's
+    first change sits exactly there, WalPositionLocator treats it as the already-processed event, resumes
+    after it, and the replayed stream filters it as 'already processed'. `false_match` is True only when the
+    log shows exactly that: stored lsn_proc == lsn_commit, a message AT that LSN was filtered, and the resume
+    position is later than it."""
+    blocks = []
+    for raw in lines:
+        line = raw.rstrip("\n")
+        if line.startswith(("+", "-")):
+            continue
+        m = DBZ_LOOKING.search(line)
+        if m:
+            blocks.append({"stored_commit_lsn": _lsn(m.group(1), m.group(2)),
+                           "stored_change_lsn": _lsn(m.group(3), m.group(4)),
+                           "lsn_after_stored": None, "will_restart": None, "restart_reason": None,
+                           "resume_lsn": None, "skipped_lsns": [], "filter_off_lsn": None})
+            continue
+        if not blocks:
+            continue
+        b = blocks[-1]
+        m = DBZ_AFTER_STORED.search(line)
+        if m:
+            b["lsn_after_stored"] = _lsn(*m.groups()[:2])
+            continue
+        m = DBZ_WILL_RESTART.search(line)
+        if m:
+            b["will_restart"] = _lsn(m.group(1), m.group(2))
+            b["restart_reason"] = m.group("why").strip()[:80]
+            continue
+        m = DBZ_RESUME.search(line)
+        if m:
+            b["resume_lsn"] = _lsn(*m.groups()[:2])
+            continue
+        m = DBZ_SKIPPED.search(line)
+        if m:
+            b["skipped_lsns"].append(_lsn(m.group(3), m.group(4)))
+            continue
+        m = DBZ_FILTER_OFF.search(line)
+        if m and b["filter_off_lsn"] is None:
+            b["filter_off_lsn"] = _lsn(*m.groups()[:2])
+    if not blocks:
+        return {"dbz_logs_seen": False, "dbz_searches": 0, "dbz_resume": None, "dbz_false_match": None}
+    last = blocks[-1]
+    stored = last["stored_change_lsn"]
+    stored_is_commit_end = stored is not None and stored == last["stored_commit_lsn"]
+    resume = last["resume_lsn"]
+    false_match = bool(stored_is_commit_end and stored in last["skipped_lsns"]
+                       and resume is not None and resume > stored)
+    last = dict(last, stored_is_commit_end=stored_is_commit_end,
+                resume_minus_stored=(resume - stored) if (resume is not None and stored is not None) else None,
+                skipped_lsns=last["skipped_lsns"][:20])
+    return {"dbz_logs_seen": True, "dbz_searches": len(blocks), "dbz_resume": last, "dbz_false_match": false_match}
+
 
 def analyze(lines, maven_exit, bare=False):
     """bare=True: the run had neither the IT log lines nor the agent (instrumentation=none), so there are no
@@ -268,7 +341,9 @@ def main(argv=None):
     ap.add_argument("--bare", action="store_true", help="instrumentation=none run (no markers exist)")
     ap.add_argument("--out", default="-")
     args = ap.parse_args(argv)
-    result = analyze(read_lines(args.log), args.maven_exit, bare=args.bare)
+    lines = read_lines(args.log)
+    result = analyze(lines, args.maven_exit, bare=args.bare)
+    result.update(analyze_dbz_resume(lines))
     result.update(json.loads(args.meta))
     text = json.dumps(result, indent=2, sort_keys=True)
     if args.out == "-":

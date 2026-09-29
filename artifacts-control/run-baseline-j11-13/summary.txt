@@ -1,0 +1,29 @@
+revision=c7304ace6e18d350314e92480df1fd3c0962f1f2
+experimentalResume=false
+run=baseline-j11-n13-36587681755-1
+agentSha256=not-loaded
+instrumentation=none
+observationPatchSha256=1d99d850e70c76d7b8e8326c229971fed858d52437e4ca3bb2e9aad89ddab9c5
+javaMatrix=11
+mavenExit=1
+testDiff:
+[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 551.575 s <<< FAILURE! - in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT
+[ERROR] testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes{TestContainer}[1]  Time elapsed: 362.29 s  <<< ERROR!
+[ERROR] Errors: 
+[ERROR]   PostgresCDCIT.testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes:625 » ConditionTimeout
+[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0
+[INFO] BUILD FAILURE
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-failsafe-plugin:2.22.2:verify (default) on project connector-cdc-postgres-e2e: There are test failures.
+[ERROR] 
+[ERROR] Please refer to /home/runner/work/seatunnel-12382-repro/seatunnel-12382-repro/seatunnel/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/target/failsafe-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+[ERROR] 
+[ERROR] After correcting the problems, you can resume the build with the command
+[ERROR]   mvn <args> -rf :connector-cdc-postgres-e2e

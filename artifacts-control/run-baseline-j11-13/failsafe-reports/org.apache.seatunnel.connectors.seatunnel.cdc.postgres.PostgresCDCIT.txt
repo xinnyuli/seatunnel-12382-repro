@@ -1,0 +1,10 @@
+-------------------------------------------------------------------------------
+Test set: org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT
+-------------------------------------------------------------------------------
+Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 551.575 s <<< FAILURE! - in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT
+testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes{TestContainer}[1]  Time elapsed: 362.29 s  <<< ERROR!
+org.awaitility.core.ConditionTimeoutException: Assertion condition defined as a lambda expression in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT expected: <1> but was: <0> within 3 minutes.
+	at org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT.testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes(PostgresCDCIT.java:625)
+Caused by: org.opentest4j.AssertionFailedError: expected: <1> but was: <0>
+	at org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT.lambda$testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes$17(PostgresCDCIT.java:628)
+

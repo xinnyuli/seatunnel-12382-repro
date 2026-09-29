@@ -1,0 +1,50 @@
+{
+  "agent_ready": false,
+  "agent_sha256": "not-loaded",
+  "boundary_verdict": "uninstrumented control: no boundary evidence by design",
+  "category": "ROW_MISSING",
+  "committed_past_row": null,
+  "duration_sec": 701,
+  "event_lsn": null,
+  "failure_lines": [
+    "[ERROR] Tests run: 1, Failures: 0, Errors: 1, Skipped: 0, Time elapsed: 566.946 s <<< FAILURE! - in org.apache.seatunnel.connectors.seatunnel.cdc.postgres.PostgresCDCIT",
+    "[ERROR]   PostgresCDCIT.testPostgresCdcSnapshotOnlyAndCommittedOffsetStartupModes:625 \u00bb ConditionTimeout"
+  ],
+  "first_missing_stage": "changeRecord_ENTER",
+  "hooks_missing": [
+    "io.debezium.connector.base.ChangeEventQueue",
+    "io.debezium.pipeline.EventDispatcher$StreamingChangeRecordReceiver",
+    "org.apache.seatunnel.connectors.cdc.base.source.reader.external.IncrementalSourceStreamFetcher",
+    "org.apache.seatunnel.connectors.cdc.base.source.reader.IncrementalSourceRecordEmitter",
+    "org.apache.seatunnel.connectors.cdc.base.source.reader.IncrementalSourceRecordEmitter$OutputCollector",
+    "org.apache.seatunnel.connectors.cdc.base.source.reader.IncrementalSourceReader",
+    "org.apache.seatunnel.connectors.seatunnel.cdc.postgres.source.reader.wal.PostgresWalFetchTask",
+    "org.apache.seatunnel.connectors.seatunnel.jdbc.sink.JdbcSinkWriter",
+    "org.apache.seatunnel.connectors.seatunnel.jdbc.internal.JdbcOutputFormat",
+    "org.postgresql.jdbc.PgConnection"
+  ],
+  "idx": 28,
+  "insert_returned": false,
+  "instrumentation": "none",
+  "invariant_violation": null,
+  "java": "11",
+  "maven_exit": 1,
+  "max_committed_lsn": null,
+  "reached_check": true,
+  "restored_slot_active": false,
+  "run_id": "dev-j11-n28-36587681755-1",
+  "sha": "4c874e2a4061aea9d5db65e74edeb211b498fe27",
+  "sink_query_counts_seen": [],
+  "sink_query_last": null,
+  "stages_reached": [],
+  "stress": true,
+  "target": "dev",
+  "tests_run": [
+    1,
+    0,
+    1,
+    0
+  ],
+  "trace_errors": [],
+  "trace_valid": false
+}

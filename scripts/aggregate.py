@@ -68,15 +68,15 @@ def load(root):
 def summarize(results):
     groups = OrderedDict()
     for r in sorted(results, key=lambda r: (r.get("target", ""), str(r.get("java", "")), r.get("idx", 0))):
-        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)), r.get("instrumentation", "full"))
+        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)), r.get("instrumentation", "full"), bool(r.get("dbz_logs", False)))
         groups.setdefault(key, []).append(r)
     rows = []
-    for (target, sha, java, stress, instr), rs in groups.items():
+    for (target, sha, java, stress, instr, dbz), rs in groups.items():
         c = Counter(r["category"] for r in rs)
         reached = c["PASS"] + c["ROW_MISSING"] + c["FAIL_AFTER_INSERT"]
         x = c["ROW_MISSING"]
         rows.append({
-            "target": target, "sha": sha, "java": java, "stress": stress, "instrumentation": instr, "runs": len(rs),
+            "target": target, "sha": sha, "java": java, "stress": stress, "instrumentation": instr, "dbz_logs": dbz, "runs": len(rs),
             "counts": {k: c.get(k, 0) for k in CATS},
             "reached_check": reached,
             "row_missing": x,
@@ -89,6 +89,20 @@ def summarize(results):
                  "event_lsn": r.get("event_lsn"), "max_committed_lsn": r.get("max_committed_lsn"),
                  "committed_past_row": r.get("committed_past_row"), "run_id": r.get("run_id"), "artifact": r.get("_path")}
                 for r in rs if r["category"] == "ROW_MISSING"],
+            # Debezium WAL resume check: does "the stored COMMIT-end LSN was mistaken for a processed event" separate
+            # missing-row runs from passing ones? Only runs whose log contains the resume search are counted.
+            "dbz": {cat: {
+                "logs_seen": sum(1 for r in rs if r["category"] == cat and r.get("dbz_logs_seen")),
+                "false_match": sum(1 for r in rs if r["category"] == cat and r.get("dbz_false_match") is True),
+            } for cat in ("PASS", "ROW_MISSING")},
+            "dbz_runs": [
+                {"category": r["category"], "run_id": r.get("run_id") or r.get("idx"), "false_match": r.get("dbz_false_match"),
+                 "stored_change_lsn": (r.get("dbz_resume") or {}).get("stored_change_lsn"),
+                 "stored_is_commit_end": (r.get("dbz_resume") or {}).get("stored_is_commit_end"),
+                 "resume_minus_stored": (r.get("dbz_resume") or {}).get("resume_minus_stored"),
+                 "skipped_at_stored": ((r.get("dbz_resume") or {}).get("stored_change_lsn") in ((r.get("dbz_resume") or {}).get("skipped_lsns") or []))
+                                      if r.get("dbz_resume") else None}
+                for r in rs if r.get("dbz_logs_seen") and r["category"] in ("ROW_MISSING", "PASS")],
         })
     return rows
 
@@ -110,12 +124,12 @@ def render(rows, expected, found, meta):
     L.append("- no production code modified; agent is test-only; resume experiment: **not applied**\n")
     if expected is not None and found < expected:
         L.append("> **WARNING:** %d of %d expected runs uploaded no result (job crashed or was cancelled). They are excluded below.\n" % (expected - found, expected))
-    L.append("| target | java | instrumentation | stress | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | FAIL_UNKNOWN | reproduction rate | 95% upper bound |")
-    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    L.append("| target | java | instrumentation | stress | debezium logs | runs | reached id=15 check | PASS | ROW_MISSING | FAIL_AFTER_INSERT | SETUP_TIMEOUT | SETUP_FAIL | NO_TEST_RUN | TIMEOUT | FAIL_UNKNOWN | reproduction rate | 95% upper bound |")
+    L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         c = r["counts"]
-        L.append("| %s | %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
-            r["target"], r["java"], r["instrumentation"], "on" if r["stress"] else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
+        L.append("| %s | %s | %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
+            r["target"], r["java"], r["instrumentation"], "on" if r["stress"] else "off", "on" if r.get("dbz_logs") else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
             c["SETUP_TIMEOUT"], c["SETUP_FAIL"], c["NO_TEST_RUN"], c["TIMEOUT"], c["FAIL_UNKNOWN"], pct(r["rate"]), pct(r["upper95_one_sided"])))
     L.append("\nRate = ROW_MISSING / runs that reached the id=15 check. Upper bound = exact (Clopper-Pearson) one-sided 95%. "
              "Runs that never reached the check (SETUP_*, NO_TEST_RUN, TIMEOUT) are not passes and are not in the denominator.\n")
@@ -123,7 +137,7 @@ def render(rows, expected, found, meta):
     L.append("## What to tell the maintainers\n")
     for r in rows:
         n, x = r["reached_check"], r["row_missing"]
-        who = "`%s` (%s, java %s%s)" % (r["target"], r["sha"][:12], r["java"], (", stress-ng on" if r["stress"] else "") + (", instrumentation=" + r["instrumentation"] if r["instrumentation"] != "full" else ""))
+        who = "`%s` (%s, java %s%s)" % (r["target"], r["sha"][:12], r["java"], (", stress-ng on" if r["stress"] else "") + (", instrumentation=" + r["instrumentation"] if r["instrumentation"] != "full" else "") + (", debezium logs on" if r.get("dbz_logs") else ""))
         if n == 0:
             L.append("- %s: no run reached the id=15 assertion (%d runs); no conclusion." % (who, r["runs"]))
         elif x == 0:
@@ -146,6 +160,27 @@ def render(rows, expected, found, meta):
     else:
         L.append("No missing-row run was captured, so **no boundary can be named** from this data. "
                  "Passing runs only show the tracing works on the normal path.\n")
+    if any(r.get("dbz_logs") for r in rows):
+        L.append("## Debezium WAL resume check (hypothesis: stored COMMIT-end LSN mistaken for a processed event)\n")
+        L.append("`false match` = the restored offset had lsn_proc == lsn_commit, Debezium filtered a replayed message **at exactly that LSN** "
+                 "as 'already processed', and resumed after it. If this explains #12382 it should appear in (nearly) every ROW_MISSING run "
+                 "and in no PASS run. Runs whose log lacks the resume search are not counted (logging not effective).\n")
+        L.append("| target | java | instrumentation | stress | ROW_MISSING with logs | ...of which false match | PASS with logs | ...of which false match |")
+        L.append("|---|---|---|---|---|---|---|---|")
+        for r in rows:
+            if not r.get("dbz_logs"):
+                continue
+            d = r["dbz"]
+            L.append("| %s | %s | %s | %s | %d | %d | %d | %d |" % (r["target"], r["java"], r["instrumentation"], "on" if r["stress"] else "off",
+                     d["ROW_MISSING"]["logs_seen"], d["ROW_MISSING"]["false_match"], d["PASS"]["logs_seen"], d["PASS"]["false_match"]))
+        miss = [(r, m) for r in rows for m in r.get("dbz_runs", []) if m["category"] == "ROW_MISSING"]
+        if miss:
+            L.append("\n| missing-row run | stored lsn_proc | stored is COMMIT end | replayed msg at stored LSN filtered | resume - stored (bytes) | false match |")
+            L.append("|---|---|---|---|---|---|")
+            for r, m in miss:
+                L.append("| %s | %s | %s | %s | %s | %s |" % (m["run_id"], m["stored_change_lsn"], m["stored_is_commit_end"],
+                         m["skipped_at_stored"], m["resume_minus_stored"], m["false_match"]))
+        L.append("")
     if any(r["untrusted_trace"] for r in rows):
         L.append("> Some counted runs have `trace_valid=false` (agent not loaded / hook missing / TRACE_ERROR). Their outcome is valid; their boundary evidence is not.\n")
     L.append("## Caveats\n")
@@ -153,6 +188,9 @@ def render(rows, expected, found, meta):
              "Compare against the `instrumentation=none` group (no IT log lines, no agent) when it exists; a difference between groups "
              "suggests observation changes the outcome, equal results only mean neither reproduced under these conditions.")
     L.append("- Hosted runners differ from the original job's runner; a low rate here bounds *this* setup only.")
+    if any(r.get("dbz_logs") for r in rows):
+        L.append("- `debezium logs on` raises three Debezium loggers to INFO in the test container's log4j2.properties (test resource, config only). "
+                 "Extra logging can shift timing slightly, so its rate is reported as its own group.")
     L.append("- SETUP_TIMEOUT (the `committed LSN >= postSeedLsn` wait, ~line 489) is a different failure from #12382 and is reported on its own.")
     return "\n".join(L) + "\n"
 

@@ -13,7 +13,7 @@ separate pause experiment; the workflow never applies it.
 2. Actions -> `repro-12382` -> Run workflow. Start with `runs=1` as a smoke test (checks agent build,
    patch, Docker, classifier), then `runs=10` or more.
 3. Inputs: `runs` (per target and Java), `targets` (`baseline,dev`), `java` (`11` = the failing CI job;
-   `8,11` for both), `dev_sha` (pin dev), `instrumentation` (`full` = IT log lines + agent; `logs-only`; `none` = untouched upstream test, no agent = the control for "does observing change the outcome?"), `stress` (`true` = stress-ng contention while the IT runs, reported as its own group), `max_parallel`.
+   `8,11` for both), `dev_sha` (pin dev), `instrumentation` (`full` = IT log lines + agent; `logs-only`; `none` = untouched upstream test, no agent = the control for "does observing change the outcome?"), `stress` (`true` = stress-ng contention while the IT runs, reported as its own group), `debezium_logs` (`true` = log Debezium's WAL resume search, see below), `max_parallel`.
 4. The run's Summary page shows the report; artifact `report` has `report.md/json`, each `run-*` artifact has
    `result.json`, `summary.txt`, `mvn.log.gz` and failsafe reports.
 
@@ -39,3 +39,17 @@ outcome is read from Maven and from the two awaitility messages: `expected: <1> 
 signature) vs `expected: <true> but was: <false> within 30 seconds` (the setup wait). Groups are reported side by side
 by `instrumentation` and `stress`. Different results between groups suggest observation changes the outcome; equal results
 only mean neither reproduced under these conditions.
+
+## Debezium WAL resume check (`debezium_logs=true`)
+
+Hypothesis from the stress runs: after restore, the stored offset's `lsn_proc` is a COMMIT end LSN (it came from a
+heartbeat, so `lsn_proc == lsn_commit`). The end of a commit record is where the next WAL record starts, so when
+id=15's INSERT is the very next record its LSN equals the stored value. Debezium 1.9.8's `WalPositionLocator`
+then treats it as the already-processed event, resumes after it, and on the replayed stream `skipMessage` filters
+the BEGIN/INSERT as "already processed"; only the COMMIT passes and the offset moves on.
+
+The test container's `log4j2.properties` sets `io.debezium.connector` to WARN, which hides that search. With
+`debezium_logs=true` the harness appends three more specific loggers (WalPositionLocator, AbstractMessageDecoder,
+PostgresStreamingChangeEventSource) at INFO to that test resource, and reverts it afterwards. No code changes.
+The report then shows, per group, how many ROW_MISSING and PASS runs show the false match. The hypothesis
+predicts (nearly) all ROW_MISSING runs and no PASS run. Combine with `instrumentation=none` to avoid the agent.

@@ -74,6 +74,11 @@ DBZ_WILL_RESTART = re.compile(r"WalPositionLocator - Will restart from LSN '%s' 
 DBZ_RESUME = re.compile(r"PostgresStreamingChangeEventSource - WAL resume position '%s' discovered" % _LSN)
 DBZ_SKIPPED = re.compile(r"AbstractMessageDecoder - Streaming requested from LSN %s, received LSN %s identified as already processed" % (_LSN, _LSN))
 DBZ_FILTER_OFF = re.compile(r"WalPositionLocator - Message with LSN '%s' arrived, switching off the filtering" % _LSN)
+DBZ_FIRST = re.compile(r"WalPositionLocator - First LSN '%s' received" % _LSN)
+# test-only wal-range patch: WAL insert/write positions right before and after the id=15 insert ("0/22BC640" form)
+_PGLSN = r"([0-9A-Fa-f]+)/([0-9A-Fa-f]+)"
+ID15_WAL = re.compile(r"\[PG12382\] ID15_WAL job=(\d+) insertBefore=%s writeBefore=%s insertAfter=%s writeAfter=%s"
+                      % (_PGLSN, _PGLSN, _PGLSN, _PGLSN))
 
 
 def _lsn(hi, lo):
@@ -99,11 +104,16 @@ def analyze_dbz_resume(lines):
             blocks.append({"stored_commit_lsn": _lsn(m.group(1), m.group(2)),
                            "stored_change_lsn": _lsn(m.group(3), m.group(4)),
                            "lsn_after_stored": None, "will_restart": None, "restart_reason": None,
-                           "resume_lsn": None, "skipped_lsns": [], "filter_off_lsn": None})
+                           "resume_lsn": None, "skipped_lsns": [], "filter_off_lsn": None,
+                           "first_lsn": None})
             continue
         if not blocks:
             continue
         b = blocks[-1]
+        m = DBZ_FIRST.search(line)
+        if m and b["first_lsn"] is None:
+            b["first_lsn"] = _lsn(*m.groups()[:2])
+            continue
         m = DBZ_AFTER_STORED.search(line)
         if m:
             b["lsn_after_stored"] = _lsn(*m.groups()[:2])
@@ -125,17 +135,53 @@ def analyze_dbz_resume(lines):
         if m and b["filter_off_lsn"] is None:
             b["filter_off_lsn"] = _lsn(*m.groups()[:2])
     if not blocks:
-        return {"dbz_logs_seen": False, "dbz_searches": 0, "dbz_resume": None, "dbz_false_match": None}
+        return {"dbz_logs_seen": False, "dbz_searches": 0, "dbz_resume": None, "dbz_false_match": None,
+                "dbz_boundary_hit": None}
     last = blocks[-1]
     stored = last["stored_change_lsn"]
     stored_is_commit_end = stored is not None and stored == last["stored_commit_lsn"]
     resume = last["resume_lsn"]
     false_match = bool(stored_is_commit_end and stored in last["skipped_lsns"]
                        and resume is not None and resume > stored)
+    # The ambiguous boundary itself, whatever the code then decides: the first WAL message seen on restart
+    # sits exactly at the stored commit-end LSN. Unfixed 1.9.8 then skips it (false_match); a fix that
+    # replays the transaction resumes AT the stored LSN instead (resume == stored, nothing skipped there).
+    boundary_hit = bool(stored_is_commit_end and last["first_lsn"] is not None and last["first_lsn"] == stored)
     last = dict(last, stored_is_commit_end=stored_is_commit_end,
                 resume_minus_stored=(resume - stored) if (resume is not None and stored is not None) else None,
                 skipped_lsns=last["skipped_lsns"][:20])
-    return {"dbz_logs_seen": True, "dbz_searches": len(blocks), "dbz_resume": last, "dbz_false_match": false_match}
+    return {"dbz_logs_seen": True, "dbz_searches": len(blocks), "dbz_resume": last, "dbz_false_match": false_match,
+            "dbz_boundary_hit": boundary_hit}
+
+
+def analyze_wal_range(lines, dbz=None):
+    """id=15 WAL range from the test-only wal-range patch, compared with Debezium's stored offset and the LSN it
+    filtered as 'already processed' (the three values asked for on #12382). insertBefore is where the next WAL
+    record will start, i.e. where id=15's first record lands unless another backend writes in between."""
+    rng = None
+    for raw in lines:
+        line = raw.rstrip("\n")
+        if line.startswith(("+", "-")):
+            continue
+        m = ID15_WAL.search(line)
+        if m:
+            g = m.groups()
+            rng = {"job": m.group(1), "insert_before": _lsn(g[1], g[2]), "write_before": _lsn(g[3], g[4]),
+                   "insert_after": _lsn(g[5], g[6]), "write_after": _lsn(g[7], g[8])}
+    if rng is None:
+        return {"id15_wal": None, "wal_equality": None}
+    eq = None
+    r = (dbz or {}).get("dbz_resume") if dbz else None
+    if r:
+        stored = r.get("stored_change_lsn")
+        skipped_at_stored = stored is not None and stored in (r.get("skipped_lsns") or [])
+        eq = {"stored_change_lsn": stored,
+              "skipped_lsn": stored if skipped_at_stored else None,
+              "first_lsn_on_restart": r.get("first_lsn"),
+              "id15_starts_at_stored": stored is not None and rng["insert_before"] == stored,
+              "id15_range_contains_skipped": skipped_at_stored and rng["insert_before"] <= stored < rng["insert_after"],
+              "id15_tx_bytes": rng["insert_after"] - rng["insert_before"]}
+    return {"id15_wal": rng, "wal_equality": eq}
 
 
 def analyze(lines, maven_exit, bare=False):
@@ -343,7 +389,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
     lines = read_lines(args.log)
     result = analyze(lines, args.maven_exit, bare=args.bare)
-    result.update(analyze_dbz_resume(lines))
+    dbz = analyze_dbz_resume(lines)
+    result.update(dbz)
+    result.update(analyze_wal_range(lines, dbz))
     result.update(json.loads(args.meta))
     text = json.dumps(result, indent=2, sort_keys=True)
     if args.out == "-":

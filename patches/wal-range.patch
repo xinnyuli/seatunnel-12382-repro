@@ -1,0 +1,44 @@
+diff --git a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+index bd889c0..efcb82f 100644
+--- a/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
++++ b/seatunnel-e2e/seatunnel-connector-v2-e2e/connector-cdc-postgres-e2e/src/test/java/org/apache/seatunnel/connectors/seatunnel/cdc/postgres/PostgresCDCIT.java
+@@ -620,7 +620,16 @@ public class PostgresCDCIT extends TestSuiteBase implements TestResource {
+             waitForReplicationSlotActive(committedSlotName);
+             // Insert only after the restored replication connection is active so this CDC record
+             // is not written before the restored slot can consume it.
++            String[] pg12382WalBefore = pg12382WalPositions();
+             insertSourceTableRow(POSTGRESQL_SCHEMA, SOURCE_TABLE_1, 15);
++            String[] pg12382WalAfter = pg12382WalPositions();
++            log.info(
++                    "[PG12382] ID15_WAL job={} insertBefore={} writeBefore={} insertAfter={} writeAfter={}",
++                    committedOffsetJobId,
++                    pg12382WalBefore[0],
++                    pg12382WalBefore[1],
++                    pg12382WalAfter[0],
++                    pg12382WalAfter[1]);
+             await().atMost(RESTORE_ASSERT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                     .untilAsserted(
+                             () -> {
+@@ -1366,6 +1375,22 @@ public class PostgresCDCIT extends TestSuiteBase implements TestResource {
+         }
+     }
+ 
++    // [PG12382] test-only (issue #12382): WAL insert/write positions around the id=15 insert.
++    private String[] pg12382WalPositions() {
++        try (Connection connection = getJdbcConnection();
++                Statement statement = connection.createStatement();
++                ResultSet resultSet =
++                        statement.executeQuery(
++                                "SELECT pg_current_wal_insert_lsn()::text, pg_current_wal_lsn()::text")) {
++            if (!resultSet.next()) {
++                throw new IllegalStateException("Failed to query current WAL positions");
++            }
++            return new String[] {resultSet.getString(1), resultSet.getString(2)};
++        } catch (SQLException e) {
++            throw new RuntimeException("Failed to query current WAL positions", e);
++        }
++    }
++
+     private String getCurrentWalLsn() {
+         try (Connection connection = getJdbcConnection();
+                 Statement statement = connection.createStatement();

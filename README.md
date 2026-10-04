@@ -53,3 +53,23 @@ The test container's `log4j2.properties` sets `io.debezium.connector` to WARN, w
 PostgresStreamingChangeEventSource) at INFO to that test resource, and reverts it afterwards. No code changes.
 The report then shows, per group, how many ROW_MISSING and PASS runs show the false match. The hypothesis
 predicts (nearly) all ROW_MISSING runs and no PASS run. Combine with `instrumentation=none` to avoid the agent.
+
+## Before/after for PR #12454 (same test, two production revisions)
+
+PR #12454 changes both the PostgreSQL CDC resume code and `PostgresCDCIT` itself, so comparing "dev" with "the PR"
+would change two things at once. `test_from_sha` keeps the test fixed: it takes only `PostgresCDCIT.java` from the
+given commit and runs it against the group's own production code.
+
+`wal_range=true` (needs `instrumentation=none`) applies `patches/wal-range.patch`, a test-only change that logs
+`pg_current_wal_insert_lsn()` / `pg_current_wal_lsn()` right before and after the id=15 insert. With
+`debezium_logs=true` the report then puts side by side, per run: the stored offset, the first WAL LSN Debezium sees on
+restart, the LSN it skipped as "already processed", and id=15's WAL range. A **boundary hit** is a run where the first
+LSN on restart equals the stored COMMIT-end LSN (the DBZ-6204 condition); the report splits hits by outcome.
+
+| run | targets | dev_sha | test_from_sha | wal_range |
+|---|---|---|---|---|
+| before (PR base, original test) | dev | `146a1b5c510e1c33010a92981ae1afc8139c624b` | (empty) | true |
+| after (PR code, same original test) | dev | `3080371ce733c3057e12add72b2e0cb2c9b66f2d` | `146a1b5c510e1c33010a92981ae1afc8139c624b` | true |
+
+Both with `java=11`, `stress=true`, `instrumentation=none`, `debezium_logs=true`. The original test is byte-identical at
+c7304ace, 4c874e2a, 146a1b5c and current dev.

@@ -68,15 +68,17 @@ def load(root):
 def summarize(results):
     groups = OrderedDict()
     for r in sorted(results, key=lambda r: (r.get("target", ""), str(r.get("java", "")), r.get("idx", 0))):
-        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)), r.get("instrumentation", "full"), bool(r.get("dbz_logs", False)))
+        key = (r.get("target", "?"), r.get("sha", "?"), str(r.get("java", "?")), bool(r.get("stress", False)), r.get("instrumentation", "full"), bool(r.get("dbz_logs", False)),
+               r.get("test_from_sha") or "", bool(r.get("wal_range", False)))
         groups.setdefault(key, []).append(r)
     rows = []
-    for (target, sha, java, stress, instr, dbz), rs in groups.items():
+    for (target, sha, java, stress, instr, dbz, test_from, walr), rs in groups.items():
         c = Counter(r["category"] for r in rs)
         reached = c["PASS"] + c["ROW_MISSING"] + c["FAIL_AFTER_INSERT"]
         x = c["ROW_MISSING"]
         rows.append({
             "target": target, "sha": sha, "java": java, "stress": stress, "instrumentation": instr, "dbz_logs": dbz, "runs": len(rs),
+            "test_from_sha": test_from or None, "wal_range": walr,
             "counts": {k: c.get(k, 0) for k in CATS},
             "reached_check": reached,
             "row_missing": x,
@@ -103,6 +105,18 @@ def summarize(results):
                  "skipped_at_stored": ((r.get("dbz_resume") or {}).get("stored_change_lsn") in ((r.get("dbz_resume") or {}).get("skipped_lsns") or []))
                                       if r.get("dbz_resume") else None}
                 for r in rs if r.get("dbz_logs_seen") and r["category"] in ("ROW_MISSING", "PASS")],
+            # The ambiguous boundary itself (first WAL message on restart sits at the stored COMMIT-end LSN), split
+            # by outcome. Unfixed code should lose the row on every hit; a fix should deliver it on every hit.
+            "boundary": {cat: sum(1 for r in rs if r["category"] == cat and r.get("dbz_boundary_hit") is True)
+                         for cat in ("PASS", "ROW_MISSING")},
+            "boundary_runs": [
+                {"category": r["category"], "run_id": r.get("run_id") or r.get("idx"),
+                 "stored": (r.get("dbz_resume") or {}).get("stored_change_lsn"),
+                 "first": (r.get("dbz_resume") or {}).get("first_lsn"),
+                 "resume_minus_stored": (r.get("dbz_resume") or {}).get("resume_minus_stored"),
+                 "false_match": r.get("dbz_false_match"),
+                 "wal": r.get("id15_wal"), "eq": r.get("wal_equality")}
+                for r in rs if r.get("dbz_boundary_hit") is True or (r["category"] == "ROW_MISSING" and r.get("id15_wal"))],
         })
     return rows
 
@@ -116,6 +130,8 @@ def render(rows, expected, found, meta):
         seen[(r["target"], r["sha"])] = True
     for (t, s) in seen:
         L.append("- `%s` = `%s`" % (t, s))
+    for tf in OrderedDict((r["test_from_sha"], 1) for r in rows if r.get("test_from_sha")):
+        L.append("- some groups run the IT file taken from `%s` (test file only; production code is the group's own revision)" % tf)
     if meta.get("dev_contains_11864") is not None:
         L.append("- dev contains merged #11864 (`5af8d789aa9ae3d94df4a9cc0f03cee3c0a6d0e6`): **%s**" % meta["dev_contains_11864"])
     if meta.get("observation_patch_sha256"):
@@ -129,7 +145,7 @@ def render(rows, expected, found, meta):
     for r in rows:
         c = r["counts"]
         L.append("| %s | %s | %s | %s | %s | %d | %d | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
-            r["target"], r["java"], r["instrumentation"], "on" if r["stress"] else "off", "on" if r.get("dbz_logs") else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
+            r["target"] + (" @ " + r["sha"][:9]) + (" (IT from " + r["test_from_sha"][:9] + ")" if r.get("test_from_sha") else "") + (" +wal-range" if r.get("wal_range") else ""), r["java"], r["instrumentation"], "on" if r["stress"] else "off", "on" if r.get("dbz_logs") else "off", r["runs"], r["reached_check"], c["PASS"], c["ROW_MISSING"], c["FAIL_AFTER_INSERT"],
             c["SETUP_TIMEOUT"], c["SETUP_FAIL"], c["NO_TEST_RUN"], c["TIMEOUT"], c["FAIL_UNKNOWN"], pct(r["rate"]), pct(r["upper95_one_sided"])))
     L.append("\nRate = ROW_MISSING / runs that reached the id=15 check. Upper bound = exact (Clopper-Pearson) one-sided 95%. "
              "Runs that never reached the check (SETUP_*, NO_TEST_RUN, TIMEOUT) are not passes and are not in the denominator.\n")
@@ -180,6 +196,29 @@ def render(rows, expected, found, meta):
             for r, m in miss:
                 L.append("| %s | %s | %s | %s | %s | %s |" % (m["run_id"], m["stored_change_lsn"], m["stored_is_commit_end"],
                          m["skipped_at_stored"], m["resume_minus_stored"], m["false_match"]))
+        L.append("")
+    if any(r.get("dbz_logs") for r in rows):
+        L.append("## Ambiguous boundary hits (stored COMMIT-end LSN == first WAL message on restart)\n")
+        L.append("A hit is the exact condition DBZ-6204 / PR #12454 is about. Unfixed code should lose the row on a hit; "
+                 "fixed code should replay that transaction (resume == stored) and deliver it.\n")
+        L.append("| group | hits that lost the row | hits that delivered the row |")
+        L.append("|---|---|---|")
+        for r in rows:
+            if r.get("dbz_logs"):
+                L.append("| %s @ %s%s | %d | %d |" % (r["target"], r["sha"][:9], (" (IT from %s)" % r["test_from_sha"][:9]) if r.get("test_from_sha") else "",
+                                                   r["boundary"]["ROW_MISSING"], r["boundary"]["PASS"]))
+        br = [(r, m) for r in rows for m in r.get("boundary_runs", [])]
+        if br:
+            def h(v):
+                return "%X/%X" % (v >> 32, v & 0xFFFFFFFF) if isinstance(v, int) else "-"
+            L.append("\n| run | outcome | stored offset (lsn_proc) | first LSN on restart | skipped as already processed | id=15 WAL range (insert before -> after) | id=15 starts at stored | resume - stored |")
+            L.append("|---|---|---|---|---|---|---|---|")
+            for r, m in br:
+                w, e = m.get("wal") or {}, m.get("eq") or {}
+                L.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                    m["run_id"], m["category"], h(m["stored"]), h(m["first"]), h(e.get("skipped_lsn")),
+                    ("%s -> %s" % (h(w.get("insert_before")), h(w.get("insert_after")))) if w else "-",
+                    e.get("id15_starts_at_stored", "-"), m["resume_minus_stored"]))
         L.append("")
     if any(r["untrusted_trace"] for r in rows):
         L.append("> Some counted runs have `trace_valid=false` (agent not loaded / hook missing / TRACE_ERROR). Their outcome is valid; their boundary evidence is not.\n")

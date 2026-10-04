@@ -31,6 +31,12 @@ on:
       debezium_logs:
         description: "true = log Debezium's WAL resume search/replay filtering (test log4j2.properties only; no code change)"
         default: "false"
+      test_from_sha:
+        description: "Optional full SHA: run PostgresCDCIT.java from this apache/seatunnel commit (test file only), e.g. the PR base when testing PR #12454's code"
+        default: ""
+      wal_range:
+        description: "true = log WAL positions right before/after the id=15 insert (test-only; needs instrumentation=none)"
+        default: "false"
       max_parallel:
         description: "Max concurrent jobs"
         default: "10"
@@ -156,6 +162,8 @@ jobs:
           IDX: ${{ matrix.idx }}
           INSTRUMENTATION: ${{ inputs.instrumentation }}
           DBZ_LOGS: ${{ inputs.debezium_logs }}
+          TEST_FROM_SHA: ${{ inputs.test_from_sha }}
+          WAL_RANGE: ${{ inputs.wal_range }}
         run: |
           SEATUNNEL_DIR="$GITHUB_WORKSPACE/seatunnel" \
           OUT_DIR="$GITHUB_WORKSPACE/out" \
@@ -165,7 +173,7 @@ jobs:
         if: always()
         run: |
           if [ -f out/result.json ]; then
-            python3 -c "import json;d=json.load(open('out/result.json'));print('### ', d['target'], 'java', d['java'], '#', d['idx'], '->', d['category'], '\n', d.get('boundary_verdict',''), '\n', 'debezium false match:', d.get('dbz_false_match'))" >> "$GITHUB_STEP_SUMMARY"
+            python3 -c "import json;d=json.load(open('out/result.json'));print('### ', d['target'], 'java', d['java'], '#', d['idx'], '->', d['category'], '\n', d.get('boundary_verdict',''), '\n', 'debezium false match:', d.get('dbz_false_match'), '| boundary hit:', d.get('dbz_boundary_hit'), '| id=15 WAL check:', d.get('wal_equality'))" >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v4
         if: always()

@@ -77,7 +77,8 @@ class Resume(unittest.TestCase):
 
     def test_no_logs(self):
         r = A.analyze_dbz_resume(["[INFO] BUILD SUCCESS"])
-        self.assertEqual(r, {"dbz_logs_seen": False, "dbz_searches": 0, "dbz_resume": None, "dbz_false_match": None})
+        self.assertEqual(r, {"dbz_logs_seen": False, "dbz_searches": 0, "dbz_resume": None, "dbz_false_match": None,
+                             "dbz_boundary_hit": None})
 
     def test_null_commit_lsn_and_diff_text(self):
         lines = [LOC + "Looking for WAL restart position for last commit LSN 'null' and last change LSN 'LSN{0/10}'",

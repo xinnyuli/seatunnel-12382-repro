@@ -1,0 +1,159 @@
+name: jdbc-uncommitted-retry
+
+# JDBC sink, manual commit + checkpointing: a flush retry after a lost connection (or a rolled-back
+# transaction) re-sends only the current batch, while earlier flushed-but-uncommitted batches are
+# gone. The checkpoint still commits, so those rows are silently lost.
+#
+#   before = apache/seatunnel dev + the new regression test only  -> the new test is expected to FAIL
+#   after  = apache/seatunnel dev + fix + tests + docs              -> all listed tests PASS,
+#            the whole connector-jdbc unit test suite passes, spotless:check passes
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_sha:
+        description: "apache/seatunnel commit to test (optional, full SHA; default = tip of dev)"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [before, after]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+
+      - name: Resolve revision
+        id: rev
+        env:
+          DEV_SHA_INPUT: ${{ inputs.dev_sha }}
+          MATRIX_MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(echo "${DEV_SHA_INPUT}" | tr -d '[:space:]')"
+          if [ -z "$SHA" ]; then
+            SHA="$(git ls-remote https://github.com/apache/seatunnel.git refs/heads/dev | cut -f1)"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Testing apache/seatunnel@$SHA ($MATRIX_MODE)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: apache/seatunnel
+          ref: ${{ steps.rev.outputs.sha }}
+          path: seatunnel
+          fetch-depth: 1
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+          cache-dependency-path: seatunnel/**/pom.xml
+
+      - name: Apply patch
+        working-directory: seatunnel
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = before ]; then P=test-only.patch; else P=full.patch; fi
+          git apply --check "../harness/patches/jdbc-uncommitted-retry/$P"
+          git apply "../harness/patches/jdbc-uncommitted-retry/$P"
+          echo "Applied $P:" >> "$GITHUB_STEP_SUMMARY"
+          git diff --stat | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build connector-jdbc and its dependencies
+        working-directory: seatunnel
+        run: |
+          ./mvnw -B -q install -pl seatunnel-connectors-v2/connector-jdbc -am -DskipTests \
+            -D"license.skipAddThirdParty"=true -D"skip.ui"=true -D"maven.javadoc.skip"=true \
+            --no-snapshot-updates
+
+      - name: Run the reconnect tests
+        id: focused
+        working-directory: seatunnel
+        continue-on-error: true
+        run: |
+          ./mvnw -B test -pl seatunnel-connectors-v2/connector-jdbc \
+            -Dtest='JdbcMultiTableReconnectTest,JdbcOutputFormatReconnectTest' \
+            -D"surefire.failIfNoSpecifiedTests"=false -DfailIfNoTests=false \
+            -D"license.skipAddThirdParty"=true --no-snapshot-updates
+
+      - name: Check outcomes (before)
+        if: ${{ matrix.mode == 'before' }}
+        run: |
+          {
+            echo "### Before the fix (dev + new regression test only)"
+            echo
+            python3 harness/scripts/check_surefire.py \
+              seatunnel/seatunnel-connectors-v2/connector-jdbc/target/surefire-reports \
+              'JdbcMultiTableReconnectTest#manualCommitWriterDoesNotDropEarlierBatchWhenLaterBatchReconnects=fail' \
+              'JdbcMultiTableReconnectTest#manualCommitWriterFailsCheckpointWhenConnectionIsReplacedBeforeCommit=fail' \
+              'JdbcMultiTableReconnectTest#generatedSqlReplaysActiveTableBufferAfterReconnect=pass'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+        shell: bash
+
+      - name: Check outcomes (after)
+        if: ${{ matrix.mode == 'after' }}
+        run: |
+          {
+            echo "### After the fix"
+            echo
+            python3 harness/scripts/check_surefire.py \
+              seatunnel/seatunnel-connectors-v2/connector-jdbc/target/surefire-reports \
+              'JdbcMultiTableReconnectTest#manualCommitWriterDoesNotDropEarlierBatchWhenLaterBatchReconnects=pass' \
+              'JdbcMultiTableReconnectTest#manualCommitWriterFailsCheckpointWhenConnectionIsReplacedBeforeCommit=pass' \
+              'JdbcOutputFormatReconnectTest#testCommitShouldFailWhenConnectionWithUncommittedBatchWasReplaced=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushShouldNotRetryRolledBackTransactionSharedWithOtherWriters=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushShouldRetryRolledBackTransactionOnAutoCommitConnection=pass' \
+              'JdbcMultiTableReconnectTest#generatedSqlReplaysActiveTableBufferAfterReconnect=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushShouldFailInsteadOfReconnectingWhenEarlierBatchIsUncommitted=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushShouldFailInsteadOfRetryingWhenTransactionIsRolledBack=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushRetryShouldReconnectAfterWriterEndedTransaction=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushRetryShouldReconnectWithEarlierBatchOnAutoCommitConnection=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushRetryShouldReconnectWhenBatchNextExceptionHasConnectionSqlState=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushRetryShouldReconnectWhenBatchNextExceptionIsStatementClosed=pass' \
+              'JdbcOutputFormatReconnectTest#testFlushRetryShouldReconnectWhenSqlServerStatementHandleIsNotExecuting=pass'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+        shell: bash
+
+      - name: Whole connector-jdbc unit test suite (after)
+        if: ${{ matrix.mode == 'after' }}
+        working-directory: seatunnel
+        run: |
+          set -o pipefail
+          ./mvnw -B test -pl seatunnel-connectors-v2/connector-jdbc \
+            -D"license.skipAddThirdParty"=true --no-snapshot-updates | tee ../module-tests.log
+        shell: bash
+
+      - name: Spotless check (after)
+        if: ${{ matrix.mode == 'after' }}
+        working-directory: seatunnel
+        run: ./mvnw -B -q spotless:check -pl seatunnel-connectors-v2/connector-jdbc --no-snapshot-updates
+
+      - name: Summarise module tests
+        if: ${{ always() && matrix.mode == 'after' }}
+        run: |
+          echo "### connector-jdbc unit tests" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$|BUILD (SUCCESS|FAILURE)" module-tests.log \
+            | tail -2 | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-${{ matrix.mode }}
+          path: seatunnel/seatunnel-connectors-v2/connector-jdbc/target/surefire-reports
+          if-no-files-found: warn
